@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 
 # ==============================================================================
-# 🎬 ULTIMATE MOVIE BOT - FINAL EXPANDED VERSION
+# 🎬 ULTIMATE MOVIE BOT - FINAL EXPANDED VERSION (FIXED MANUAL POST)
 # ==============================================================================
 # Features Included:
 # 1. TMDB & IMDb Link Search Logic
-# 2. Manual Post Creation Flow
+# 2. Manual Post Creation Flow (Fixed Image Issue)
 # 3. Face Detection & Watermarking
 # 4. Log Channel Backup System
 # 5. URL Shortener Integration
@@ -275,24 +275,28 @@ def check_premium(func):
     return wrapper
 
 # ==============================================================================
-# 4. IMAGE PROCESSING & CAPTION GENERATION
+# 4. IMAGE PROCESSING & CAPTION GENERATION (UPDATED)
 # ==============================================================================
 
 def watermark_poster(poster_input, watermark_text: str, badge_text: str = None):
     """
     Advanced poster editor:
     - Adds text watermark (bottom).
-    - Adds custom badge (top) with face detection to avoid covering faces.
+    - Adds custom badge (top) with face detection.
+    - UPDATED: Handles URL, Local File Path, or BytesIO.
     """
     if not poster_input:
         return None, "Poster not found."
     
     try:
-        # Load Image from URL or Bytes
+        # Load Image from URL, File Path, or Bytes
         if isinstance(poster_input, str):
-            img_data = requests.get(poster_input, timeout=15).content
-            original_img = Image.open(io.BytesIO(img_data)).convert("RGBA")
-        else:
+            if poster_input.startswith("http"): # It's a URL
+                img_data = requests.get(poster_input, timeout=15).content
+                original_img = Image.open(io.BytesIO(img_data)).convert("RGBA")
+            else: # It's a Local File Path
+                original_img = Image.open(poster_input).convert("RGBA")
+        else: # It's BytesIO or File Object
             original_img = Image.open(poster_input).convert("RGBA")
         
         img = Image.new("RGBA", original_img.size)
@@ -925,31 +929,41 @@ async def main_conversation_handler(client, message: Message):
         return
 
     # -----------------------------------------------------------
-    # MANUAL MODE INPUTS
+    # MANUAL MODE INPUTS (UPDATED - SAFE FILE HANDLING)
     # -----------------------------------------------------------
     if state == "wait_manual_title":
         convo["details"]["title"] = text
         convo["details"]["name"] = text
         convo["state"] = "wait_manual_year"
-        await message.reply_text("✅ Title Saved.\n\n📅 **Send Year:** (e.g. 2024)")
+        await message.reply_text("✅ Title Saved.\n\n📅 **Send Year:** (e.g. 2024)\n_Send 'skip' to leave empty._")
         
     elif state == "wait_manual_year":
-        convo["details"]["release_date"] = f"{text}-01-01"
-        convo["details"]["first_air_date"] = f"{text}-01-01"
+        if text.lower() == "skip":
+            convo["details"]["release_date"] = "----"
+            convo["details"]["first_air_date"] = "----"
+        else:
+            convo["details"]["release_date"] = f"{text}-01-01"
+            convo["details"]["first_air_date"] = f"{text}-01-01"
         convo["state"] = "wait_manual_rating"
-        await message.reply_text("✅ Year Saved.\n\n⭐ **Send Rating:** (e.g. 7.5)")
+        await message.reply_text("✅ Year Saved.\n\n⭐ **Send Rating:** (e.g. 7.5)\n_Send 'skip' to leave empty._")
         
     elif state == "wait_manual_rating":
-        try:
-            convo["details"]["vote_average"] = float(text)
-        except:
-            convo["details"]["vote_average"] = 0.0
+        if text.lower() == "skip":
+             convo["details"]["vote_average"] = 0.0
+        else:
+            try:
+                convo["details"]["vote_average"] = float(text)
+            except:
+                convo["details"]["vote_average"] = 0.0
         convo["state"] = "wait_manual_genres"
-        await message.reply_text("✅ Rating Saved.\n\n🎭 **Send Genres:** (e.g. Action, Drama)")
+        await message.reply_text("✅ Rating Saved.\n\n🎭 **Send Genres:** (e.g. Action, Drama)\n_Send 'skip' to leave empty._")
         
     elif state == "wait_manual_genres":
-        genres = [{"name": g.strip()} for g in text.split(",")]
-        convo["details"]["genres"] = genres
+        if text.lower() == "skip":
+            convo["details"]["genres"] = []
+        else:
+            genres = [{"name": g.strip()} for g in text.split(",")]
+            convo["details"]["genres"] = genres
         convo["state"] = "wait_manual_poster"
         await message.reply_text("✅ Genres Saved.\n\n🖼 **Send Poster Photo:**")
         
@@ -957,10 +971,18 @@ async def main_conversation_handler(client, message: Message):
         if not message.photo:
             return await message.reply_text("❌ Please send a Photo.")
         
-        photo_path = await client.download_media(message, in_memory=True)
-        convo["details"]["poster_bytes"] = photo_path
-        convo["state"] = "wait_lang"
-        await message.reply_text("✅ Poster Saved.\n\n🌐 **Send Language:** (e.g. Hindi)")
+        # নিরাপদ ছবি ডাউনলোডিং (Safe Local Download)
+        msg = await message.reply_text("⬇️ Downloading poster...")
+        photo_name = f"poster_{uid}_{int(time.time())}.jpg"
+        try:
+            photo_path = await client.download_media(message, file_name=photo_name)
+            convo["details"]["poster_local_path"] = photo_path # Save LOCAL PATH
+            await msg.delete()
+            
+            convo["state"] = "wait_lang"
+            await message.reply_text("✅ Poster Saved.\n\n🌐 **Send Language:** (e.g. Hindi, English)")
+        except Exception as e:
+            await msg.edit_text(f"❌ Error downloading poster: {e}")
 
     elif state == "wait_lang" and convo.get("is_manual"):
         convo["language"] = text
@@ -977,7 +999,7 @@ async def main_conversation_handler(client, message: Message):
         )
 
     # -----------------------------------------------------------
-    # FILE UPLOAD & LOG CHANNEL BACKUP LOGIC (Fixed)
+    # FILE UPLOAD & LOG CHANNEL BACKUP LOGIC
     # -----------------------------------------------------------
     elif state == "wait_file_upload":
         if not (message.video or message.document):
@@ -1093,14 +1115,20 @@ async def process_final_post(client, cb: CallbackQuery):
     # 🆕 NEW: Add "How to Download" Button at the bottom
     buttons.append([InlineKeyboardButton("ℹ️ How to Download / কিভাবে ডাউনলোড করবেন", callback_data="show_tutorial")])
     
-    # 3. Process Image (Watermark + Badge)
+    # 3. Process Image (Watermark + Badge) [UPDATED LOGIC]
     details = convo['details']
     user_data = await users_collection.find_one({'_id': uid})
     
     poster_input = None
-    if details.get('poster_bytes'):
-        poster_input = details['poster_bytes']
-        poster_input.seek(0)
+    
+    # Priority 1: Manual Local File Check
+    if details.get('poster_local_path'):
+        poster_input = details['poster_local_path']
+    # Priority 2: Memory Bytes (Legacy)
+    elif details.get('poster_bytes'):
+         poster_input = details['poster_bytes']
+         poster_input.seek(0)
+    # Priority 3: TMDB Poster Path
     elif details.get('poster_path'):
         poster_input = f"https://image.tmdb.org/t/p/w500{details['poster_path']}"
         
@@ -1199,7 +1227,16 @@ async def send_to_channel_handler(client, cb: CallbackQuery):
 async def close_post_handler(client, cb: CallbackQuery):
     uid = cb.from_user.id
     if uid in user_conversations:
+        # Cleanup: Delete the local poster file if it exists
+        local_path = user_conversations[uid].get('details', {}).get('poster_local_path')
+        if local_path and os.path.exists(local_path):
+            try:
+                os.remove(local_path)
+            except Exception as e:
+                logger.warning(f"Failed to delete temp file: {e}")
+                
         del user_conversations[uid]
+        
     await cb.message.delete()
     await cb.answer("✅ Session Closed.", show_alert=True)
 
