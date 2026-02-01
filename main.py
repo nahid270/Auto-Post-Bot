@@ -1,21 +1,13 @@
 # -*- coding: utf-8 -*-
 
 # ==============================================================================
-# 🎬 ULTIMATE MOVIE BOT - ABSOLUTE FULL VERSION (FINAL)
+# 🎬 ULTIMATE MOVIE BOT - FINAL VERSION (VARIABLE FIX)
 # ==============================================================================
-# Features Included:
-# 1. TMDB Auto Search (/post)
-# 2. Manual Post (/manual) - No Language Restriction, Fixed Upload Panel
-# 3. File Store System (Upload File -> Get Short Link)
-# 4. Face Detection & Watermarking
-# 5. Log Channel Backup
-# 6. Auto Delete Timer
-# 7. URL Shortener Integration
-# 8. Channel Management
-# 9. Admin Controls & Broadcast
+# Fix Log:
+# 1. Fixed 'UnboundLocalError: local variable msg' in file upload section.
+# 2. Replaced 'msg.delete()' with 'message.delete()'.
 # ==============================================================================
 
-# ---- Core Python Imports ----
 import os
 import io
 import re
@@ -37,7 +29,7 @@ from flask import Flask
 from dotenv import load_dotenv
 import motor.motor_asyncio
 import numpy as np
-import cv2  # OpenCV for Face Detection
+import cv2 
 
 # ==============================================================================
 # 1. CONFIGURATION AND SETUP
@@ -80,7 +72,7 @@ db = db_client[DB_NAME]
 users_collection = db.users
 files_collection = db.files 
 
-# Global Variables for Session Management
+# Global Variables
 user_conversations = {}
 BOT_USERNAME = ""
 
@@ -93,7 +85,7 @@ bot = Client(
 )
 
 # ==============================================================================
-# FLASK KEEP-ALIVE SERVER (For 24/7 Hosting)
+# FLASK KEEP-ALIVE SERVER
 # ==============================================================================
 app = Flask(__name__)
 
@@ -104,7 +96,6 @@ def home():
 def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 
-# Start Flask in a separate thread
 Thread(target=run_flask, daemon=True).start()
 
 
@@ -113,7 +104,6 @@ Thread(target=run_flask, daemon=True).start()
 # ==============================================================================
 
 async def get_bot_username():
-    """Fetch and cache the bot username."""
     global BOT_USERNAME
     if not BOT_USERNAME:
         me = await bot.get_me()
@@ -121,12 +111,10 @@ async def get_bot_username():
     return BOT_USERNAME
 
 def generate_random_code(length=8):
-    """Generate a random alphanumeric code."""
     chars = string.ascii_letters + string.digits
     return ''.join(secrets.choice(chars) for _ in range(length))
 
 async def auto_delete_message(client, chat_id, message_id, delay_seconds):
-    """Background task to delete a message after a delay."""
     if delay_seconds > 0:
         await asyncio.sleep(delay_seconds)
         try:
@@ -137,7 +125,6 @@ async def auto_delete_message(client, chat_id, message_id, delay_seconds):
 # --- Resource Downloaders ---
 
 def download_cascade():
-    """Download OpenCV Face Cascade file."""
     cascade_file = "haarcascade_frontalface_default.xml"
     if not os.path.exists(cascade_file):
         url = "https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/haarcascade_frontalface_default.xml"
@@ -150,7 +137,6 @@ def download_cascade():
     return cascade_file
 
 def download_font():
-    """Download Custom Font."""
     font_file = "HindSiliguri-Bold.ttf"
     if not os.path.exists(font_file):
         url = "https://github.com/google/fonts/raw/main/ofl/hindsiliguri/HindSiliguri-Bold.ttf"
@@ -165,7 +151,6 @@ def download_font():
 # --- Database Helpers ---
 
 async def add_user_to_db(user):
-    """Add or Update user in MongoDB."""
     await users_collection.update_one(
         {'_id': user.id},
         {
@@ -176,7 +161,6 @@ async def add_user_to_db(user):
     )
 
 async def is_user_premium(user_id: int) -> bool:
-    """Check if a user is premium."""
     if user_id == OWNER_ID:
         return True
     user_data = await users_collection.find_one({'_id': user_id})
@@ -185,7 +169,6 @@ async def is_user_premium(user_id: int) -> bool:
     return False
 
 async def shorten_link(user_id: int, long_url: str):
-    """Shorten a URL using the user's API settings."""
     user_data = await users_collection.find_one({'_id': user_id})
     
     if not user_data or 'shortener_api' not in user_data or 'shortener_url' not in user_data:
@@ -244,15 +227,11 @@ def check_premium(func):
 # ==============================================================================
 
 def watermark_poster(poster_input, watermark_text: str, badge_text: str = None):
-    """
-    Adds watermark and badge to the poster.
-    """
     if not poster_input:
         return None, "Poster not found."
     
     try:
         original_img = None
-        # Load Image
         if isinstance(poster_input, str):
             if poster_input.startswith("http"): # URL
                 img_data = requests.get(poster_input, timeout=15).content
@@ -281,13 +260,11 @@ def watermark_poster(poster_input, watermark_text: str, badge_text: str = None):
             except:
                 badge_font = ImageFont.load_default()
 
-            # Text Size
             bbox = draw.textbbox((0, 0), badge_text, font=badge_font)
             text_width = bbox[2] - bbox[0]
             text_height = bbox[3] - bbox[1]
             x = (img.width - text_width) / 2
             
-            # Face Detection
             y_pos = img.height * 0.03
             cascade_path = download_cascade()
             
@@ -315,7 +292,6 @@ def watermark_poster(poster_input, watermark_text: str, badge_text: str = None):
             y = y_pos
             padding = int(badge_font_size * 0.15)
             
-            # Background
             rect_layer = Image.new('RGBA', img.size, (0, 0, 0, 0))
             rect_draw = ImageDraw.Draw(rect_layer)
             rect_draw.rectangle(
@@ -325,7 +301,6 @@ def watermark_poster(poster_input, watermark_text: str, badge_text: str = None):
             img = Image.alpha_composite(img, rect_layer)
             draw = ImageDraw.Draw(img)
 
-            # Gradient Text
             gradient = Image.new('RGBA', (text_width, text_height + int(padding)), (0, 0, 0, 0))
             gradient_draw = ImageDraw.Draw(gradient)
             
@@ -427,7 +402,7 @@ async def generate_channel_caption(data: dict, language: str, short_links: dict,
         if isinstance(data["genres"][0], dict):
             genre_str = ", ".join([g["name"] for g in data.get("genres", [])[:3]])
         else:
-            genre_str = str(data.get("genres")) # For manual input string
+            genre_str = str(data.get("genres"))
     else:
         genre_str = "N/A"
 
@@ -622,7 +597,7 @@ async def settings_commands(client, message: Message):
         else: await message.reply_text("❌ No channels saved.")
 
 # ==============================================================================
-# 6. AUTO POST CREATION (TMDB)
+# 6. AUTO POST (TMDB)
 # ==============================================================================
 
 @bot.on_message(filters.command("post") & filters.private)
@@ -650,7 +625,7 @@ async def post_search_cmd(client, message: Message):
         await msg.edit_text(f"👇 **Found {len(results)} Result(s):**", reply_markup=InlineKeyboardMarkup(buttons))
 
 # ==============================================================================
-# 7. MANUAL POST SYSTEM (MERGED & FIXED)
+# 7. MANUAL POST SYSTEM
 # ==============================================================================
 
 @bot.on_message(filters.command("manual") & filters.private)
@@ -859,7 +834,7 @@ async def main_conversation_handler(client, message: Message):
 
     elif state == "wait_lang" and convo.get("is_manual"):
         convo["language"] = text
-        # CRITICAL FIX: Use Reply (is_edit=False) to avoid crashing on text input
+        # Use Reply to avoid crashing
         await show_upload_panel(message, uid, is_edit=False)
 
     # --- BADGE & CUSTOM BUTTON ---
@@ -910,7 +885,7 @@ async def main_conversation_handler(client, message: Message):
             
             convo['links'][btn_name] = short_link
             
-            await msg.delete() # Delete user file to keep chat clean
+            await message.delete() # Corrected variable name
             # Reply with panel (fresh message)
             await show_upload_panel(status_msg, uid, is_edit=False)
             
