@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
 
 # ==============================================================================
-# 🎬 ULTIMATE MOVIE BOT - UPDATED FIXED VERSION (TUTORIAL LINK + MANUAL FIX)
+# 🎬 ULTIMATE MOVIE BOT - FINAL UPDATED VERSION (MANUAL FIX + NEW COMMAND)
 # ==============================================================================
 # Features Included:
 # 1. TMDB & IMDb Link Search Logic
-# 2. Manual Post Creation Flow (Fixed Image & Logic)
+# 2. DEDICATED MANUAL POST COMMAND (/manual) - Fixed & Open for All
 # 3. Face Detection & Watermarking
 # 4. Log Channel Backup System
 # 5. URL Shortener Integration
 # 6. Auto Delete Timer
 # 7. Custom Button / Episode Support
-# 8. Tutorial Link Support (YouTube/Telegram Link via Command)
+# 8. Tutorial Link Support
 # 9. Manual Channel Selection for Posting
 # ==============================================================================
 
@@ -119,18 +119,6 @@ async def get_bot_username():
         me = await bot.get_me()
         BOT_USERNAME = me.username
     return BOT_USERNAME
-
-def humanbytes(size):
-    """Convert bytes to readable format (MB, GB) for captions."""
-    if not size:
-        return ""
-    power = 2**10
-    n = 0
-    power_labels = {0 : '', 1: 'K', 2: 'M', 3: 'G', 4: 'T'}
-    while size > power:
-        size /= power
-        n += 1
-    return f"{size:.2f} {power_labels[n]}B"
 
 def generate_random_code(length=8):
     """Generate a random alphanumeric code for deep links."""
@@ -289,6 +277,7 @@ def watermark_poster(poster_input, watermark_text: str, badge_text: str = None):
         return None, "Poster not found."
     
     try:
+        original_img = None
         # Load Image from URL, File Path, or Bytes
         if isinstance(poster_input, str):
             if poster_input.startswith("http"): # It's a URL
@@ -298,9 +287,12 @@ def watermark_poster(poster_input, watermark_text: str, badge_text: str = None):
                 if os.path.exists(poster_input):
                     original_img = Image.open(poster_input).convert("RGBA")
                 else:
-                    return None, "Local file not found"
+                    return None, f"Local file not found: {poster_input}"
         else: # It's BytesIO or File Object
             original_img = Image.open(poster_input).convert("RGBA")
+            
+        if not original_img:
+            return None, "Failed to load image."
         
         img = Image.new("RGBA", original_img.size)
         img.paste(original_img)
@@ -408,6 +400,7 @@ def watermark_poster(poster_input, watermark_text: str, badge_text: str = None):
         return buffer, None
 
     except Exception as e:
+        logger.error(f"Watermark Error: {e}")
         return None, str(e)
 
 # --- TMDB & IMDb Functions ---
@@ -575,7 +568,7 @@ async def start_cmd(client, message: Message):
     else:
         # User Menu
         status_text = "💎 **Premium User**" if is_premium else "👤 **Free User**"
-        welcome_text = f"👋 **Hello {user.first_name}!**\n\nYour Status: {status_text}\n\nUse `/post` to create new posts."
+        welcome_text = f"👋 **Hello {user.first_name}!**\n\nYour Status: {status_text}\n\n👇 **Available Commands:**\n`/post` - Auto TMDB Post (Premium)\n`/manual` - Manual Post (Free for All)"
         
         user_buttons = [[InlineKeyboardButton("👤 My Account", callback_data="my_account")]]
         if not is_premium:
@@ -628,7 +621,6 @@ async def callback_handler(client, cb: CallbackQuery):
 
 @bot.on_message(filters.command(["setwatermark", "setapi", "setdomain", "settimer", "addchannel", "delchannel", "mychannels", "settutorial"]) & filters.private)
 @force_subscribe
-@check_premium
 async def settings_commands(client, message: Message):
     cmd = message.command[0].lower()
     uid = message.from_user.id
@@ -703,7 +695,7 @@ async def settings_commands(client, message: Message):
             await message.reply_text("❌ No channels saved.")
 
 # ==============================================================================
-# 6. POST CREATION FLOW (TMDB + IMDb + Manual)
+# 6. POST CREATION FLOW (TMDB + IMDb)
 # ==============================================================================
 
 @bot.on_message(filters.command("post") & filters.private)
@@ -736,39 +728,47 @@ async def post_search_cmd(client, message: Message):
         year = (r.get('release_date') or r.get('first_air_date') or '----')[:4]
         buttons.append([InlineKeyboardButton(f"🎬 {title} ({year})", callback_data=f"sel_{m_type}_{r['id']}")])
     
-    buttons.append([InlineKeyboardButton("📝 Create Manually (No TMDB)", callback_data="manual_start")])
-    
     if not results:
-        await msg.edit_text("❌ **No TMDB results found!**\nTry searching manually or check spelling.", reply_markup=InlineKeyboardMarkup(buttons))
+        await msg.edit_text("❌ **No TMDB results found!**\nTry searching manually or check spelling.")
     else:
         await msg.edit_text(f"👇 **Found {len(results)} Result(s):**", reply_markup=InlineKeyboardMarkup(buttons))
 
-# --- Manual Mode Handlers ---
+# ==============================================================================
+# 🆕 6.1 DEDICATED MANUAL POST COMMAND (OPEN FOR ALL)
+# ==============================================================================
 
-@bot.on_callback_query(filters.regex("^manual_"))
-async def manual_post_handler(client, cb: CallbackQuery):
-    data = cb.data
+@bot.on_message(filters.command("manual") & filters.private)
+@force_subscribe
+async def manual_cmd_start(client, message: Message):
+    """
+    Dedicated Manual Post Entry Point.
+    No premium check required here.
+    """
+    await message.reply_text(
+        "📝 **Manual Post Creation**\n\nWhat are you uploading?",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎬 Movie", callback_data="manual_type_movie"),
+             InlineKeyboardButton("📺 Web Series", callback_data="manual_type_tv")]
+        ])
+    )
+
+@bot.on_callback_query(filters.regex("^manual_type_"))
+async def manual_type_handler(client, cb: CallbackQuery):
+    m_type = cb.data.split("_")[2]
     uid = cb.from_user.id
     
-    if data == "manual_start":
-        await cb.message.edit_text(
-            "📝 **Manual Post Creation**\n\nWhat are you uploading?",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🎬 Movie", callback_data="manual_type_movie"),
-                 InlineKeyboardButton("📺 Web Series", callback_data="manual_type_tv")]
-            ])
-        )
-    elif data.startswith("manual_type_"):
-        m_type = data.split("_")[2]
-        user_conversations[uid] = {
-            "details": {"media_type": m_type},
-            "links": {},
-            "state": "wait_manual_title",
-            "is_manual": True
-        }
-        await cb.message.edit_text(f"📝 **Step 1:** Send the **Title** of the {m_type}.")
+    # Initialize session for Manual Post
+    user_conversations[uid] = {
+        "details": {"media_type": m_type},
+        "links": {},
+        "state": "wait_manual_title",
+        "is_manual": True
+    }
+    await cb.message.edit_text(f"📝 **Step 1:** Send the **Title** of the {m_type}.")
 
-# --- Selection & Post Flow Handlers ---
+# ==============================================================================
+# 7. CALLBACK HANDLERS & UPLOAD PANEL
+# ==============================================================================
 
 @bot.on_callback_query(filters.regex("^sel_"))
 async def media_selected(client, cb: CallbackQuery):
@@ -874,11 +874,10 @@ async def back_button(client, cb: CallbackQuery):
     await show_upload_panel(cb, cb.from_user.id)
 
 # ==============================================================================
-# 7. MAIN MESSAGE HANDLER (TEXT & FILES)
+# 8. MAIN MESSAGE HANDLER (TEXT & FILES)
 # ==============================================================================
 
 @bot.on_message(filters.private & (filters.text | filters.video | filters.document | filters.photo))
-@check_premium
 async def main_conversation_handler(client, message: Message):
     uid = message.from_user.id
     convo = user_conversations.get(uid)
@@ -1081,7 +1080,7 @@ async def main_conversation_handler(client, message: Message):
                 await message.reply_text(f"❌ **Error:** {str(e)}")
 
 # ==============================================================================
-# 8. FINAL POST PROCESSING & CHANNEL SELECTION
+# 9. FINAL POST PROCESSING & CHANNEL SELECTION
 # ==============================================================================
 
 @bot.on_callback_query(filters.regex("^proc_final"))
