@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 
 # ==============================================================================
-# 🎬 ULTIMATE MOVIE BOT - ALL IN ONE (Expanded Version)
+# 🎬 ULTIMATE MOVIE BOT - ALL IN ONE (Final Fixed Version)
 # Features: TMDB, Manual Post, Face Detect Watermark, Log Channel, Shortener, Auto Delete
+# Fixed: Message Edit Error & Clean Caption Format
 # ==============================================================================
 
 # ---- Core Python Imports ----
@@ -225,7 +226,6 @@ def force_subscribe(func):
                 chat_id = int(FORCE_SUB_CHANNEL) if FORCE_SUB_CHANNEL.startswith("-100") else FORCE_SUB_CHANNEL
                 await client.get_chat_member(chat_id, message.from_user.id)
             except UserNotParticipant:
-                # Handle Deep Link Start - Don't let them access file, but provide a retry link
                 join_link = INVITE_LINK or f"https://t.me/{FORCE_SUB_CHANNEL.replace('@', '')}"
                 
                 if len(message.command) > 1:
@@ -245,7 +245,7 @@ def force_subscribe(func):
                     )
             except Exception as e:
                 logger.error(f"Force Sub Error: {e}")
-                pass # Ignore other errors like admin check failure
+                pass 
         await func(client, message)
     return wrapper
 
@@ -267,11 +267,7 @@ def check_premium(func):
 # ==============================================================================
 
 def watermark_poster(poster_input, watermark_text: str, badge_text: str = None):
-    """
-    Advanced poster editor:
-    - Adds text watermark (bottom).
-    - Adds custom badge (top) with face detection to avoid covering faces.
-    """
+    """Advanced poster editor: Watermark + Face Detect Badge"""
     if not poster_input:
         return None, "Poster not found."
     
@@ -287,7 +283,7 @@ def watermark_poster(poster_input, watermark_text: str, badge_text: str = None):
         img.paste(original_img)
         draw = ImageDraw.Draw(img)
 
-        # ---- Badge Logic (with Gradient & Face Detect) ----
+        # ---- Badge Logic ----
         if badge_text:
             badge_font_size = int(img.width / 9)
             font_path = download_font()
@@ -296,7 +292,6 @@ def watermark_poster(poster_input, watermark_text: str, badge_text: str = None):
             except:
                 badge_font = ImageFont.load_default()
 
-            # Calculate Text Size
             bbox = draw.textbbox((0, 0), badge_text, font=badge_font)
             text_width = bbox[2] - bbox[0]
             text_height = bbox[3] - bbox[1]
@@ -313,25 +308,23 @@ def watermark_poster(poster_input, watermark_text: str, badge_text: str = None):
                     face_cascade = cv2.CascadeClassifier(cascade_path)
                     faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
                     
-                    # Check collision
+                    is_collision = False
                     padding = int(badge_font_size * 0.2)
                     text_box_y1 = y_pos + text_height + padding
                     
-                    is_collision = False
                     for (fx, fy, fw, fh) in faces:
                         if y_pos < (fy + fh) and text_box_y1 > fy:
                             is_collision = True
                             break
                     
                     if is_collision:
-                        y_pos = img.height * 0.25  # Move down if face detected at top
+                        y_pos = img.height * 0.25 
                 except Exception as e:
                     logger.error(f"Face detection failed: {e}")
 
             y = y_pos
             padding = int(badge_font_size * 0.15)
             
-            # Draw Semi-transparent Background for Badge
             rect_layer = Image.new('RGBA', img.size, (0, 0, 0, 0))
             rect_draw = ImageDraw.Draw(rect_layer)
             rect_draw.rectangle(
@@ -341,12 +334,12 @@ def watermark_poster(poster_input, watermark_text: str, badge_text: str = None):
             img = Image.alpha_composite(img, rect_layer)
             draw = ImageDraw.Draw(img)
 
-            # Draw Gradient Text
+            # Gradient Text
             gradient = Image.new('RGBA', (text_width, text_height + int(padding)), (0, 0, 0, 0))
             gradient_draw = ImageDraw.Draw(gradient)
             
-            start_color = (255, 255, 0) # Yellow
-            end_color = (255, 69, 0)   # OrangeRed
+            start_color = (255, 255, 0)
+            end_color = (255, 69, 0)
             
             for i in range(text_width):
                 ratio = i / text_width
@@ -377,9 +370,7 @@ def watermark_poster(poster_input, watermark_text: str, badge_text: str = None):
             wx = (img.width - text_width) / 2
             wy = img.height - bbox[3] - (img.height * 0.05)
             
-            # Shadow
             draw.text((wx + 2, wy + 2), watermark_text, font=font, fill=(0, 0, 0, 128))
-            # Text
             draw.text((wx, wy), watermark_text, font=font, fill=(255, 255, 255, 200))
             
         buffer = io.BytesIO()
@@ -419,20 +410,16 @@ def get_tmdb_details(media_type, media_id):
 
 async def generate_channel_caption(data: dict, language: str, short_links: dict):
     """Generates the text caption for the channel post."""
-    
-    # 1. Basic Info
     title = data.get("title") or data.get("name") or "Movie"
     date = data.get("release_date") or data.get("first_air_date") or "----"
     year = date[:4]
     rating = f"{data.get('vote_average', 0):.1f}"
     
-    # 2. Genres
     if isinstance(data.get("genres"), list) and len(data["genres"]) > 0:
         genre_str = ", ".join([g["name"] for g in data.get("genres", [])[:3]])
     else:
         genre_str = "N/A"
 
-    # 3. Construct Caption
     caption = f"""🎬 **{title} ({year})**
 ━━━━━━━━━━━━━━━━━━━━━━━
 ⭐ **Rating:** {rating}/10
@@ -442,7 +429,6 @@ async def generate_channel_caption(data: dict, language: str, short_links: dict)
 👀 𝗪𝗔𝗧𝗖𝗛 𝗢𝗡𝗟𝗜𝗡𝗘/📤𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗
 👇  ℍ𝕚𝕘𝕙 𝕊𝕡𝕖𝕖𝕕 | ℕ𝕠 𝔹𝕦𝕗𝕗𝕖𝕣𝕚𝕟𝕘  👇"""
 
-    # 4. Footer
     footer = """\n\nMovie ReQuest Group 
 👇👇👇
 https://t.me/Terabox_search_group
@@ -464,7 +450,7 @@ async def start_cmd(client, message: Message):
     await add_user_to_db(user)
     
     # ------------------------------------------------------------------
-    # 🚀 FILE RETRIEVAL SYSTEM (DEEP LINK + LOG CHANNEL BACKUP)
+    # 🚀 FILE RETRIEVAL SYSTEM (Clean Caption Updated)
     # ------------------------------------------------------------------
     if len(message.command) > 1:
         code = message.command[1]
@@ -477,15 +463,14 @@ async def start_cmd(client, message: Message):
             
             # 2. Get Info
             log_msg_id = file_data.get("log_msg_id")
+            # Only use specific caption (No extra text)
             caption = file_data.get("caption", "🎬 **Movie File**")
-            caption += "\n\n**✅ Downloaded via MovieBot**"
             timer = file_data.get("delete_timer", 0)
 
             try:
                 sent_msg = None
                 
-                # METHOD A: Send by File ID (Fastest)
-                # If we have the file_id from the Log Channel, we can send it directly
+                # METHOD A: Send by File ID
                 try:
                     sent_msg = await client.send_cached_media(
                         chat_id=uid,
@@ -496,8 +481,7 @@ async def start_cmd(client, message: Message):
                     logger.warning(f"Failed to send cached media: {e}. Trying fallback.")
                     sent_msg = None
 
-                # METHOD B: Copy from Log Channel (Backup)
-                # If Method A fails, copy directly from the channel
+                # METHOD B: Copy from Log Channel
                 if not sent_msg and LOG_CHANNEL_ID and log_msg_id:
                     sent_msg = await client.copy_message(
                         chat_id=uid,
@@ -531,7 +515,6 @@ async def start_cmd(client, message: Message):
     is_premium = await is_user_premium(uid)
     
     if uid == OWNER_ID:
-        # Admin Menu
         welcome_text = f"👑 **Welcome Boss!**\n\n**Admin Control Panel:**"
         buttons = InlineKeyboardMarkup([
             [InlineKeyboardButton("📢 Broadcast", callback_data="admin_broadcast"),
@@ -541,7 +524,6 @@ async def start_cmd(client, message: Message):
              [InlineKeyboardButton("⚙️ Setup Instructions", callback_data="api_help")]
         ])
     else:
-        # User Menu
         status_text = "💎 **Premium User**" if is_premium else "👤 **Free User**"
         welcome_text = f"👋 **Hello {user.first_name}!**\n\nYour Status: {status_text}\n\nUse `/post` to create new posts."
         
@@ -602,7 +584,6 @@ async def settings_commands(client, message: Message):
     cmd = message.command[0].lower()
     uid = message.from_user.id
     
-    # 1. Watermark
     if cmd == "setwatermark":
         text = " ".join(message.command[1:])
         if text:
@@ -611,7 +592,6 @@ async def settings_commands(client, message: Message):
         else:
             await message.reply_text("❌ Usage: `/setwatermark Your Text`")
 
-    # 2. Shortener API
     elif cmd == "setapi":
         if len(message.command) > 1:
             await users_collection.update_one({'_id': uid}, {'$set': {'shortener_api': message.command[1]}}, upsert=True)
@@ -619,7 +599,6 @@ async def settings_commands(client, message: Message):
         else:
             await message.reply_text("❌ Usage: `/setapi YOUR_KEY`")
 
-    # 3. Shortener Domain
     elif cmd == "setdomain":
         if len(message.command) > 1:
             await users_collection.update_one({'_id': uid}, {'$set': {'shortener_url': message.command[1]}}, upsert=True)
@@ -627,7 +606,6 @@ async def settings_commands(client, message: Message):
         else:
             await message.reply_text("❌ Usage: `/setdomain shrinkme.io`")
 
-    # 4. Auto Delete Timer
     elif cmd == "settimer":
         if len(message.command) > 1:
             try:
@@ -641,7 +619,6 @@ async def settings_commands(client, message: Message):
             await users_collection.update_one({'_id': uid}, {'$set': {'delete_timer': 0}})
             await message.reply_text("✅ Auto-Delete DISABLED.")
 
-    # 5. Add Channel
     elif cmd == "addchannel":
         if len(message.command) > 1:
             cid = message.command[1]
@@ -650,14 +627,12 @@ async def settings_commands(client, message: Message):
         else:
             await message.reply_text("❌ Usage: `/addchannel -100xxxxx`")
 
-    # 6. Delete Channel
     elif cmd == "delchannel":
         if len(message.command) > 1:
             cid = message.command[1]
             await users_collection.update_one({'_id': uid}, {'$pull': {'channel_ids': cid}})
             await message.reply_text(f"✅ Channel `{cid}` removed.")
 
-    # 7. List Channels
     elif cmd == "mychannels":
         data = await users_collection.find_one({'_id': uid})
         channels = data.get('channel_ids', [])
@@ -689,7 +664,6 @@ async def post_search_cmd(client, message: Message):
         year = (r.get('release_date') or r.get('first_air_date') or '----')[:4]
         buttons.append([InlineKeyboardButton(f"🎬 {title} ({year})", callback_data=f"sel_{m_type}_{r['id']}")])
     
-    # Add Manual Option at the bottom
     buttons.append([InlineKeyboardButton("📝 Create Manually (No TMDB)", callback_data="manual_start")])
     
     if not buttons:
@@ -911,7 +885,7 @@ async def main_conversation_handler(client, message: Message):
         await show_upload_panel(message, uid)
 
     # -----------------------------------------------------------
-    # FILE UPLOAD & LOG CHANNEL BACKUP LOGIC
+    # FILE UPLOAD & LOG CHANNEL BACKUP LOGIC (Fixed)
     # -----------------------------------------------------------
     elif state == "wait_file_upload":
         if not (message.video or message.document):
@@ -939,9 +913,18 @@ async def main_conversation_handler(client, message: Message):
             
             details = convo['details']
             title = details.get('title') or details.get('name') or "Unknown"
-            file_size = message.video.file_size if message.video else message.document.file_size
             
-            tmdb_caption = f"🎬 **{title}**\n🔰 Quality: {quality}\n📦 Size: {humanbytes(file_size)}"
+            # -- Clean Caption Construction (Name, Year, Language, Quality) --
+            date = details.get("release_date") or details.get("first_air_date") or "----"
+            year = date[:4]
+            language = convo.get("language", "Unknown")
+
+            tmdb_caption = (
+                f"🎬 **Movie:** {title}\n"
+                f"📅 **Year:** {year}\n"
+                f"🔊 **Language:** {language}\n"
+                f"🔰 **Quality:** {quality}"
+            )
             
             # E. Get User Timer Settings
             user_data = await users_collection.find_one({'_id': uid})
@@ -952,7 +935,7 @@ async def main_conversation_handler(client, message: Message):
                 "code": code,
                 "file_id": backup_file_id,  # File ID from Log Channel
                 "log_msg_id": backup_msg_id, # Msg ID from Log Channel
-                "caption": tmdb_caption,
+                "caption": tmdb_caption, # ✅ Only clean caption stored
                 "delete_timer": timer,
                 "uploader_id": uid,
                 "created_at": datetime.now()
@@ -965,12 +948,15 @@ async def main_conversation_handler(client, message: Message):
             # H. Update Conversation
             convo['links'][quality] = short_link
             
-            await status_msg.edit_text(f"✅ **{quality} File Uploaded & Linked!**")
-            await show_upload_panel(message, uid)
+            # ✅ ERROR FIX: Using status_msg instead of message for editing
+            await show_upload_panel(status_msg, uid)
             
         except Exception as e:
             logger.error(f"Upload Error: {e}")
-            await status_msg.edit_text(f"❌ **Error:** {str(e)}")
+            try:
+                await status_msg.edit_text(f"❌ **Error:** {str(e)}")
+            except:
+                await message.reply_text(f"❌ **Error:** {str(e)}")
 
 # ==============================================================================
 # 8. FINAL POST PROCESSING
