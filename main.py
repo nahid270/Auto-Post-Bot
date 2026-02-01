@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 
 # ==============================================================================
-# 🎬 ULTIMATE MOVIE BOT - FINAL UPDATED VERSION (MANUAL FIX + NEW COMMAND)
+# 🎬 ULTIMATE MOVIE BOT - FINAL UPDATED VERSION (MANUAL FIX + CLEAN CAPTION)
 # ==============================================================================
 # Features Included:
 # 1. TMDB & IMDb Link Search Logic
-# 2. DEDICATED MANUAL POST COMMAND (/manual) - Fixed & Open for All
+# 2. DEDICATED MANUAL POST COMMAND (/manual) - Clean & Accurate
 # 3. Face Detection & Watermarking
 # 4. Log Channel Backup System
 # 5. URL Shortener Integration
@@ -449,25 +449,42 @@ def get_tmdb_details(media_type, media_id):
         logger.error(f"TMDB Details Error: {e}")
         return None
 
-async def generate_channel_caption(data: dict, language: str, short_links: dict):
-    """Generates the text caption for the channel post (Fancy Version)."""
+# ==============================================================================
+# 🆕 UPDATED CAPTION GENERATOR (MANUAL MODE FIX)
+# ==============================================================================
+async def generate_channel_caption(data: dict, language: str, short_links: dict, is_manual: bool = False):
+    """
+    Generates the text caption.
+    If is_manual is True, it DOES NOT add the promotional footer.
+    """
     title = data.get("title") or data.get("name") or "Movie"
     date = data.get("release_date") or data.get("first_air_date") or "----"
     year = date[:4]
-    rating = f"{data.get('vote_average', 0):.1f}"
+    rating_val = data.get('vote_average', 0)
+    if rating_val:
+        rating = f"{rating_val:.1f}"
+    else:
+        rating = "N/A"
     
     if isinstance(data.get("genres"), list) and len(data["genres"]) > 0:
         genre_str = ", ".join([g["name"] for g in data.get("genres", [])[:3]])
     else:
         genre_str = "N/A"
 
-    # Fancy Caption for Channels
+    # Base Info (Clean Caption)
     caption = f"""🎬 **{title} ({year})**
 ━━━━━━━━━━━━━━━━━━━━━━━
 ⭐ **Rating:** {rating}/10
 🎭 **Genre:** {genre_str}
 🔊 **Language:** {language}
-━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━"""
+
+    # 🛑 CHECK: If Manual Post, Return ONLY this info. No footer.
+    if is_manual:
+        return caption
+
+    # If Automatic (TMDB) Post, Add Promotional Text
+    caption += """
 👀 𝗪𝗔𝗧𝗖𝗛 𝗢𝗡𝗟𝗜𝗡𝗘/📤𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗
 👇  ℍ𝕚𝕘𝕙 𝕊𝕡𝕖𝕖𝕕 | ℕ𝕠 𝔹𝕦𝕗𝕗𝕖𝕣𝕚𝕟𝕘  👇"""
 
@@ -762,7 +779,7 @@ async def manual_type_handler(client, cb: CallbackQuery):
         "details": {"media_type": m_type},
         "links": {},
         "state": "wait_manual_title",
-        "is_manual": True
+        "is_manual": True # Flag set for Clean Caption
     }
     await cb.message.edit_text(f"📝 **Step 1:** Send the **Title** of the {m_type}.")
 
@@ -1096,11 +1113,15 @@ async def process_final_post(client, cb: CallbackQuery):
         
     await cb.message.edit_text("🖼️ **Generating Poster & Preview...**\nPlease wait a moment.")
     
-    # 1. Generate Caption (Fancy for Channel)
+    # Check if this is a manual post
+    is_manual = convo.get("is_manual", False)
+
+    # 1. Generate Caption (Pass is_manual flag)
     caption = await generate_channel_caption(
         convo['details'],
         convo.get('language', 'Unknown'),
-        convo['links']
+        convo['links'],
+        is_manual=is_manual
     )
     
     # 2. Create Buttons (Handle Custom Names properly)
@@ -1124,10 +1145,10 @@ async def process_final_post(client, cb: CallbackQuery):
     
     poster_input = None
     
-    # Priority 1: Manual Local File Check (Fixes Manual Post Issue)
+    # Priority 1: Manual Local File Check (Prioritize Manual Upload)
     if details.get('poster_local_path') and os.path.exists(details['poster_local_path']):
         poster_input = details['poster_local_path']
-    # Priority 2: TMDB Poster Path
+    # Priority 2: TMDB Poster Path (Only if not manual/local not found)
     elif details.get('poster_path'):
         poster_input = f"https://image.tmdb.org/t/p/w500{details['poster_path']}"
         
