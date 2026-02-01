@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 
 # ==============================================================================
-# 🎬 ULTIMATE MOVIE BOT - ALL IN ONE (Full Expanded Version)
+# 🎬 ULTIMATE MOVIE BOT - ALL IN ONE (Final Pro Version)
 # Features: 
 # 1. TMDB & IMDb Link Search
 # 2. Manual Post Creation
 # 3. Face Detect Watermark & Badge
 # 4. Log Channel Backup
 # 5. URL Shortener Support
-# 6. Auto Delete Timer
-# 7. Select Channel to Post (Manual Control)
+# 6. Select Channel to Post (Manual Control)
+# 7. How to Download (Tutorial Video System) [NEW]
 # ==============================================================================
 
 # ---- Core Python Imports ----
@@ -586,11 +586,10 @@ async def callback_handler(client, cb: CallbackQuery):
     elif data == "api_help":
         help_text = (
             "**⚙️ Bot Setup Commands:**\n\n"
-            "1. `/setapi <your_api_key>` - Set your Shortener API.\n"
-            "2. `/setdomain <domain.com>` - Set Shortener Domain.\n"
-            "3. `/setwatermark <text>` - Set image watermark.\n"
-            "4. `/settimer <minutes>` - Set auto-delete timer.\n"
-            "5. `/addchannel <id>` - Add channel for posting."
+            "1. `/setapi <your_api_key>` - Set Shortener.\n"
+            "2. `/setwatermark <text>` - Set watermark.\n"
+            "3. `/settutorial` - Reply to video to set Tutorial.\n"
+            "4. `/addchannel <id>` - Add channel."
         )
         await cb.answer(help_text, show_alert=True)
         
@@ -614,7 +613,7 @@ async def callback_handler(client, cb: CallbackQuery):
 
 # --- Settings Commands ---
 
-@bot.on_message(filters.command(["setwatermark", "setapi", "setdomain", "settimer", "addchannel", "delchannel", "mychannels"]) & filters.private)
+@bot.on_message(filters.command(["setwatermark", "setapi", "setdomain", "settimer", "addchannel", "delchannel", "mychannels", "settutorial"]) & filters.private)
 @force_subscribe
 @check_premium
 async def settings_commands(client, message: Message):
@@ -642,6 +641,19 @@ async def settings_commands(client, message: Message):
             await message.reply_text("✅ Domain Saved.")
         else:
             await message.reply_text("❌ Usage: `/setdomain shrinkme.io`")
+            
+    # 🆕 NEW TUTORIAL SETTING COMMAND
+    elif cmd == "settutorial":
+        if uid != OWNER_ID:
+            return await message.reply_text("❌ Only Owner can set tutorial.")
+        
+        if not message.reply_to_message or not message.reply_to_message.video:
+            return await message.reply_text("❌ **Usage:** Reply to a **Video** with `/settutorial`")
+            
+        video_file_id = message.reply_to_message.video.file_id
+        # Save to Owner's DB Entry
+        await users_collection.update_one({'_id': OWNER_ID}, {'$set': {'tutorial_video': video_file_id}}, upsert=True)
+        await message.reply_text("✅ **Tutorial Video Saved!**\nIt will appear in every post.")
 
     elif cmd == "settimer":
         if len(message.command) > 1:
@@ -1034,6 +1046,9 @@ async def process_final_post(client, cb: CallbackQuery):
     buttons = []
     for qual, link in convo['links'].items():
         buttons.append([InlineKeyboardButton(f"📥 Download {qual}", url=link)])
+        
+    # 🆕 NEW: Add "How to Download" Button
+    buttons.append([InlineKeyboardButton("ℹ️ How to Download / কিভাবে ডাউনলোড করবেন", callback_data="show_tutorial")])
     
     # 3. Process Image (Watermark + Badge)
     details = convo['details']
@@ -1095,6 +1110,27 @@ async def process_final_post(client, cb: CallbackQuery):
         reply_markup=InlineKeyboardMarkup(channel_btns)
     )
 
+# 🆕 NEW CALLBACK: Handle "How to Download" Click
+@bot.on_callback_query(filters.regex("^show_tutorial"))
+async def show_tutorial_handler(client, cb: CallbackQuery):
+    # Retrieve Tutorial Video ID from OWNER's data
+    owner_data = await users_collection.find_one({'_id': OWNER_ID})
+    video_id = owner_data.get('tutorial_video')
+    
+    if video_id:
+        try:
+            await client.send_video(
+                chat_id=cb.from_user.id,
+                video=video_id,
+                caption="🎥 **How to Download / কিভাবে ডাউনলোড করবেন:**"
+            )
+            await cb.answer("✅ Video Sent to Inbox!", show_alert=True)
+        except Exception as e:
+            await cb.answer("❌ Start the Bot in PM first!", show_alert=True)
+    else:
+        await cb.answer("⚠️ No Tutorial Video Set by Admin.", show_alert=True)
+
+# Post to Channel Handler
 @bot.on_callback_query(filters.regex("^sndch_"))
 async def send_to_channel_handler(client, cb: CallbackQuery):
     uid = cb.from_user.id
