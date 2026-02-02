@@ -1,14 +1,12 @@
 # -*- coding: utf-8 -*-
 
 # ==============================================================================
-# 🎬 ULTIMATE MOVIE BOT - SUPER SEARCH & LINK FIX EDITION
+# 🎬 ULTIMATE MOVIE BOT - PREMIUM FILE CAPTION EDITION
 # ==============================================================================
 # Update Log:
-# 1. Added Full Support for IMDb Links (https://imdb.com/title/tt...) and IDs (tt12345).
-# 2. Added Full Support for TMDB Links.
-# 3. Improved Search Engine (Finds movies/series more accurately).
-# 4. Fixed 'UnboundLocalError' & optimized file handling.
-# 5. Added Custom Language Support via Button & Manual Input.
+# 1. Added Rich Caption Support for Files (Name, Year, Language, Genre).
+# 2. Optimized File Storage Logic.
+# 3. Retained all previous features (Auto/Manual Post, Watermark, TMDB/IMDb).
 # ==============================================================================
 
 import os
@@ -355,19 +353,17 @@ def watermark_poster(poster_input, watermark_text: str, badge_text: str = None):
 # --- TMDB & IMDb Functions ---
 
 def search_tmdb(query: str):
-    # Enhanced search logic
     url = f"https://api.themoviedb.org/3/search/multi?api_key={TMDB_API_KEY}&query={query}&include_adult=true&page=1"
     try:
         r = requests.get(url, timeout=10)
         r.raise_for_status()
         data = r.json()
         results = data.get("results", [])
-        return [res for res in results if res.get("media_type") in ["movie", "tv"]][:8] # Increased limit
+        return [res for res in results if res.get("media_type") in ["movie", "tv"]][:8] 
     except Exception:
         return []
 
 def search_by_imdb(imdb_id: str):
-    # Ensures full IMDb ID support (tt1234567)
     url = f"https://api.themoviedb.org/3/find/{imdb_id}?api_key={TMDB_API_KEY}&external_source=imdb_id"
     try:
         r = requests.get(url, timeout=10)
@@ -394,13 +390,11 @@ def get_tmdb_details(media_type, media_id):
         return None
 
 def extract_id_from_url(url: str):
-    # 1. Check for TMDB Link
     tmdb_pattern = r"themoviedb\.org/(movie|tv)/(\d+)"
     tmdb_match = re.search(tmdb_pattern, url)
     if tmdb_match:
         return "tmdb", tmdb_match.group(1), tmdb_match.group(2)
 
-    # 2. Check for IMDb ID (tt1234567) inside URL or string
     imdb_pattern = r"tt\d{5,}"
     imdb_match = re.search(imdb_pattern, url)
     if imdb_match:
@@ -409,7 +403,7 @@ def extract_id_from_url(url: str):
     return "text", None, url
 
 # ==============================================================================
-# CAPTION GENERATOR
+# CAPTION GENERATOR (POST)
 # ==============================================================================
 async def generate_channel_caption(data: dict, language: str, short_links: dict, is_manual: bool = False):
     title = data.get("title") or data.get("name") or "Movie"
@@ -465,6 +459,7 @@ async def start_cmd(client, message: Message):
         if file_data:
             msg = await message.reply_text("📂 **Fetching your file...**")
             log_msg_id = file_data.get("log_msg_id")
+            # Uses the rich caption saved in DB
             caption = file_data.get("caption", "🎬 **Movie File**")
             timer = file_data.get("delete_timer", 0)
 
@@ -649,7 +644,6 @@ async def post_search_cmd(client, message: Message):
             }
             langs = [["English", "Hindi"], ["Bengali", "Dual Audio"]]
             buttons = [[InlineKeyboardButton(l, callback_data=f"lang_{l}") for l in row] for row in langs]
-            # UPDATE: Added Custom Language Button
             buttons.append([InlineKeyboardButton("✍️ Custom Language", callback_data="lang_custom")])
             
             return await msg.edit_text(f"✅ Found: **{details.get('title') or details.get('name')}**\n\n🌐 **Select Language:**", reply_markup=InlineKeyboardMarkup(buttons))
@@ -728,7 +722,6 @@ async def media_selected(client, cb: CallbackQuery):
     
     langs = [["English", "Hindi"], ["Bengali", "Dual Audio"]]
     buttons = [[InlineKeyboardButton(l, callback_data=f"lang_{l}") for l in row] for row in langs]
-    # UPDATE: Added Custom Language Button
     buttons.append([InlineKeyboardButton("✍️ Custom Language", callback_data="lang_custom")])
 
     await cb.message.edit_text(f"✅ Selected: **{details.get('title') or details.get('name')}**\n\n🌐 **Select Language:**", reply_markup=InlineKeyboardMarkup(buttons))
@@ -738,21 +731,16 @@ async def language_selected(client, cb: CallbackQuery):
     data = cb.data.split("_")[1]
     uid = cb.from_user.id
     
-    # UPDATE: Handle Custom Language Click
     if data == "custom":
         user_conversations[uid]["state"] = "wait_custom_lang"
         await cb.message.edit_text("✍️ **Type Your Custom Language:**\n(e.g. Tamil, French, Spanish Dubbed)")
         return
 
     user_conversations[uid]["language"] = data
-    # For Auto post, we can edit the message
     await show_upload_panel(cb.message, uid, is_edit=True)
 
 async def show_upload_panel(message, uid, is_edit=False):
-    """
-    Shows the panel to upload files.
-    Safely handles both Message objects (Reply) and Callback objects (Edit).
-    """
+    """Shows the panel to upload files."""
     buttons = [
         [InlineKeyboardButton("📤 Upload 480p", callback_data="up_480p")],
         [InlineKeyboardButton("📤 Upload 720p", callback_data="up_720p")],
@@ -776,7 +764,6 @@ async def show_upload_panel(message, uid, is_edit=False):
     if is_edit:
         await message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
     else:
-        # Crucial for Manual Flow to prevent edit crash
         await message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
 @bot.on_callback_query(filters.regex("^add_custom_btn"))
@@ -808,7 +795,6 @@ async def badge_menu_handler(client, cb: CallbackQuery):
 
 @bot.on_callback_query(filters.regex("^back_panel"))
 async def back_button(client, cb: CallbackQuery):
-    # Back button always edits
     await show_upload_panel(cb.message, cb.from_user.id, is_edit=True)
 
 # ==============================================================================
@@ -855,7 +841,7 @@ async def main_conversation_handler(client, message: Message):
         del user_conversations[uid]
         return
 
-    # --- MANUAL MODE INPUTS (FIXED) ---
+    # --- MANUAL MODE INPUTS ---
     if state == "wait_manual_title":
         convo["details"]["title"] = text
         convo["details"]["name"] = text
@@ -890,19 +876,15 @@ async def main_conversation_handler(client, message: Message):
             photo_path = await client.download_media(message, file_name=f"poster_{uid}_{int(time.time())}.jpg")
             convo["details"]["poster_local_path"] = os.path.abspath(photo_path) 
             await msg.delete()
-            
             convo["state"] = "wait_lang"
-            # Just ask for language, no suggestions
             await message.reply_text("✅ Poster Saved.\n\n🌐 **Enter Language:**")
         except Exception as e:
             await msg.edit_text(f"❌ Error: {e}")
 
     elif state == "wait_lang" and convo.get("is_manual"):
         convo["language"] = text
-        # Use Reply to avoid crashing
         await show_upload_panel(message, uid, is_edit=False)
         
-    # --- UPDATE: CUSTOM LANGUAGE HANDLER ---
     elif state == "wait_custom_lang":
         convo["language"] = text
         await message.reply_text(f"✅ Language Set: **{text}**")
@@ -919,7 +901,7 @@ async def main_conversation_handler(client, message: Message):
         convo["state"] = "wait_file_upload"
         await message.reply_text(f"📤 **Upload File for: '{text}'**\n👉 Send Video/File now.")
 
-    # --- FILE UPLOAD LOGIC ---
+    # --- FILE UPLOAD LOGIC (UPDATED WITH RICH CAPTION) ---
     elif state == "wait_file_upload":
         if not (message.video or message.document):
             return await message.reply_text("❌ Please send a **Video** or **Document** file.")
@@ -930,34 +912,61 @@ async def main_conversation_handler(client, message: Message):
         status_msg = await message.reply_text("🔄 **Processing File...**")
         
         try:
-            # Forward to Log
+            # 1. Forward to Log Channel
             log_msg = await message.copy(chat_id=LOG_CHANNEL_ID, caption=f"#BACKUP\nUser: {uid}\nItem: {btn_name}")
             backup_file_id = log_msg.video.file_id if log_msg.video else log_msg.document.file_id
             
-            # Save DB
-            code = generate_random_code()
+            # 2. Generate RICH CAPTION for the file
             details = convo['details']
             title = details.get('title') or details.get('name') or "Unknown"
             
-            # Caption for File
-            tmdb_caption = f"🎬 **Movie:** {title}\n🔰 **Quality:** {btn_name}"
+            # Year extraction
+            date = details.get("release_date") or details.get("first_air_date") or "----"
+            year = date[:4]
             
+            # Language
+            lang = convo.get("language", "Unknown")
+            
+            # Genre Formatting
+            if isinstance(details.get("genres"), list) and len(details["genres"]) > 0:
+                if isinstance(details["genres"][0], dict):
+                    genre_str = ", ".join([g["name"] for g in details.get("genres", [])[:3]])
+                else:
+                    genre_str = str(details.get("genres")[0])
+            else:
+                genre_str = "N/A"
+
+            # Rich Caption Template
+            file_caption = (
+                f"🎬 **{title} ({year})**\n"
+                f"🔰 **Quality:** {btn_name}\n"
+                f"🔊 **Language:** {lang}\n"
+                f"🎭 **Genre:** {genre_str}\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"🤖 @{await get_bot_username()}"
+            )
+            
+            # 3. Save to Database with new caption
+            code = generate_random_code()
             user_data = await users_collection.find_one({'_id': uid})
             
             await files_collection.insert_one({
-                "code": code, "file_id": backup_file_id, "log_msg_id": log_msg.id,
-                "caption": tmdb_caption, "delete_timer": user_data.get('delete_timer', 0),
-                "uploader_id": uid, "created_at": datetime.now()
+                "code": code, 
+                "file_id": backup_file_id, 
+                "log_msg_id": log_msg.id,
+                "caption": file_caption, # Saving the detailed caption here
+                "delete_timer": user_data.get('delete_timer', 0),
+                "uploader_id": uid, 
+                "created_at": datetime.now()
             })
             
-            # Shorten
+            # 4. Shorten Link
             bot_uname = await get_bot_username()
             short_link = await shorten_link(uid, f"https://t.me/{bot_uname}?start={code}")
             
             convo['links'][btn_name] = short_link
             
-            await message.delete() # Corrected variable name
-            # Reply with panel (fresh message)
+            await message.delete() 
             await show_upload_panel(status_msg, uid, is_edit=False)
             
         except Exception as e:
@@ -986,7 +995,6 @@ async def process_final_post(client, cb: CallbackQuery):
     # 2. Buttons
     buttons = []
     priority = ["480p", "720p", "1080p"]
-    # Sort: Priority first, then others
     sorted_keys = sorted(convo['links'].keys(), key=lambda x: priority.index(x) if x in priority else 99)
 
     for qual in sorted_keys:
