@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 
 # ==============================================================================
-# 🎬 ULTIMATE MOVIE BOT - PREMIUM EDITION (BATCH WITH SEASON TAG UPDATE)
+# 🎬 ULTIMATE MOVIE BOT - PREMIUM EDITION (WITH BLOGGER REDIRECT SYSTEM)
 # ==============================================================================
 # Update Log:
 # 1. Added Rich Caption Support for Files.
 # 2. MOVIE REQUEST SYSTEM.
-# 3. BATCH UPLOAD WITH OPTIONAL SEASON TAG (New).
+# 3. BATCH UPLOAD WITH OPTIONAL SEASON TAG.
+# 4. BLOGGER/WEBSITE REDIRECT SUPPORT (Anti-Ban Link System).
 # ==============================================================================
 
 import os
@@ -50,6 +51,14 @@ FORCE_SUB_CHANNEL = os.getenv("FORCE_SUB_CHANNEL")
 INVITE_LINK = os.getenv("INVITE_LINK")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID")) 
+
+# ------------------------------------------------------------------------------
+# 🌐 BLOGGER / WEBSITE REDIRECT CONFIGURATION (MIDDLEMAN SYSTEM)
+# ------------------------------------------------------------------------------
+# এখানে আপনার ব্লগের লিংক দিন (শেষে স্ল্যাশ '/' দিবেন না)
+# উদাহরণ: "https://mymoviev2.blogspot.com"
+# যদি এটি ফাঁকা রাখেন, তবে বট সাধারণ টেলিগ্রাম লিংক তৈরি করবে (যা রিস্কি)।
+BLOG_URL = os.getenv("BLOG_URL", "") 
 
 # Database Configuration
 DB_URI = os.getenv("DATABASE_URI")
@@ -1030,7 +1039,7 @@ async def main_conversation_handler(client, message: Message):
         convo["state"] = "wait_file_upload"
         await message.reply_text(f"📤 **Upload File for: '{text}'**\n👉 Send Video/File now.")
 
-    # --- [UPDATED] FILE UPLOAD LOGIC (BATCH WITH SEASON SUPPORT) ---
+    # --- [UPDATED] FILE UPLOAD LOGIC (BATCH WITH SEASON SUPPORT & BLOGGER REDIRECT) ---
     elif state == "wait_file_upload":
         if not (message.video or message.document):
             return await message.reply_text("❌ Please send a **Video** or **Document** file.")
@@ -1103,9 +1112,19 @@ async def main_conversation_handler(client, message: Message):
                 "created_at": datetime.now()
             })
             
-            # 4. Shorten Link
+            # 4. Generate Link (BRIDGE SYSTEM: BLOGGER vs DIRECT)
             bot_uname = await get_bot_username()
-            short_link = await shorten_link(uid, f"https://t.me/{bot_uname}?start={code}")
+            
+            if BLOG_URL and "http" in BLOG_URL:
+                # If Blogger/Site URL is set, use it (Safe Method)
+                # Removes trailing slash if user added it
+                base_blog = BLOG_URL.rstrip("/")
+                final_long_url = f"{base_blog}/?code={code}"
+            else:
+                # Fallback to direct telegram link (Risky if bot banned)
+                final_long_url = f"https://t.me/{bot_uname}?start={code}"
+            
+            short_link = await shorten_link(uid, final_long_url)
             
             convo['links'][btn_name] = short_link
             
