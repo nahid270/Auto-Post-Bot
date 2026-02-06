@@ -964,11 +964,15 @@ async def repost_handler(client, cb: CallbackQuery):
     
     try:
         if action == "repost_full":
-            # Option 1: Copy the entire updated message as a NEW post
+            # 1. আগে আপডেট হওয়া মেসেজটি (বাটনসহ) নিয়ে আসা
+            updated_msg = await client.get_messages(chat_id, msg_id)
+            
+            # 2. মেসেজটি কপি করা (বাটনগুলো স্পষ্টভাবে উল্লেখ করে)
             await client.copy_message(
                 chat_id=chat_id,
                 from_chat_id=chat_id,
-                message_id=msg_id
+                message_id=msg_id,
+                reply_markup=updated_msg.reply_markup  # <--- এই লাইনটি বাটন কপি করা নিশ্চিত করে
             )
             await cb.message.edit_text(f"✅ **Fresh Post Sent!**\nUsers have been notified about **{update_text}**.")
             
@@ -997,12 +1001,12 @@ async def repost_handler(client, cb: CallbackQuery):
             await cb.message.edit_text(f"✅ **Alert Sent!**\nNotification sent for **{update_text}**.")
             
     except Exception as e:
+        logger.error(f"Repost Error: {e}")
         await cb.message.edit_text(f"❌ **Failed to Repost:** {e}")
     
     # Clean up
     if uid in user_conversations:
         del user_conversations[uid]
-
 # ==============================================================================
 # 10. MAIN MESSAGE HANDLER (TEXT & FILES) - INCLUDES EDIT LOGIC
 # ==============================================================================
