@@ -12,7 +12,7 @@
 # 6. AUTO YOUTUBE TRAILER FETCH & TRENDING MOVIES.
 # 7. SETTINGS DASHBOARD (/settings) & DATABASE BACKUP (/backup).
 # 8. ASYNC ANTI-LAG IMAGE PROCESSING.
-# 9. SMART AUTO-REPLY REQUEST SYSTEM (With Auto-Spell Checker)
+# 9. SMART AUTO-REPLY REQUEST SYSTEM (With Auto-Spell Checker & Genre/Lang display)
 # 10. DIRECT TEXT SEARCH (No need to click "Request Movie" button!)
 # 11. SET DOMAIN COMMAND (/setdomain) FOR URL SHORTENERS.
 # 12. [FIXED] AUTO-SEARCH URL SHORTENER INTEGRATION FOR INCOME GENERATION.
@@ -1193,11 +1193,23 @@ async def main_conversation_handler(client, message: Message):
             
             if found_files:
                 buttons = []
+                languages = set()
+                genres = set()
+                
                 for f in found_files:
-                    qual_match = re.search(r"Quality:\*\*\s*(.*?)\n", f.get('caption', ''))
+                    caption_text = f.get('caption', '')
+                    
+                    qual_match = re.search(r"Quality:\*\*\s*(.*?)\n", caption_text)
                     qual = qual_match.group(1).strip() if qual_match else "Download"
                     
-                    # --- INCOME FIX: Using URL Shortener for Search Results ---
+                    lang_match = re.search(r"Language:\*\*\s*(.*?)\n", caption_text)
+                    if lang_match and lang_match.group(1).strip() not in ["Unknown", "N/A"]:
+                        languages.add(lang_match.group(1).strip())
+                        
+                    genre_match = re.search(r"Genre:\*\*\s*(.*?)\n", caption_text)
+                    if genre_match and genre_match.group(1).strip() not in ["Unknown", "N/A"]:
+                        genres.add(genre_match.group(1).strip())
+                    
                     bot_uname = await get_bot_username()
                     file_code = f['code']
                     
@@ -1207,15 +1219,19 @@ async def main_conversation_handler(client, message: Message):
                     else:
                         final_long_url = f"https://t.me/{bot_uname}?start={file_code}"
                     
-                    # Get the uploader's ID so the correct shortener is applied
                     uploader_id = f.get('uploader_id', uid) 
                     short_link = await shorten_link(uploader_id, final_long_url)
                     
                     buttons.append([InlineKeyboardButton(f"📥 {qual}", url=short_link)])
                     
+                display_lang = ", ".join(languages) if languages else "Unknown"
+                display_genre = list(genres)[0] if genres else "Unknown"
+                    
                 await msg.edit_text(
                     f"✅ **খুশির খবর!**\nআপনি যেই মুভিটি খুঁজছেন, তা আমাদের কাছে আগে থেকেই আপলোড করা আছে।\n\n"
-                    f"🎬 **Name:** {corrected_title}\n\n"
+                    f"🎬 **Name:** {corrected_title}\n"
+                    f"🎭 **Genre:** {display_genre}\n"
+                    f"🔊 **Language:** {display_lang}\n\n"
                     f"👇 নিচ থেকে সরাসরি ডাউনলোড করে নিন:",
                     reply_markup=InlineKeyboardMarkup(buttons)
                 )
