@@ -13,7 +13,8 @@
 # 7. SETTINGS DASHBOARD (/settings) & DATABASE BACKUP (/backup).
 # 8. ASYNC ANTI-LAG IMAGE PROCESSING.
 # 9. SMART AUTO-REPLY REQUEST SYSTEM (With Auto-Spell Checker)
-# 10. [NEW] DIRECT TEXT SEARCH (No need to click "Request Movie" button!)
+# 10. DIRECT TEXT SEARCH (No need to click "Request Movie" button!)
+# 11. [NEW] SET DOMAIN COMMAND (/setdomain) FOR URL SHORTENERS.
 # ==============================================================================
 
 import os
@@ -512,6 +513,7 @@ async def settings_dashboard(client, message: Message):
             f"📢 **Saved Channels:** `{channel_list}`\n\n"
             f"💡 **How to change:**\n"
             f"• `/setwatermark Text`\n"
+            f"• `/setdomain url.com`\n"
             f"• `/setapi Key`\n"
             f"• `/settimer 10` (in mins)\n"
             f"• `/addchannel -100xxx`")
@@ -678,7 +680,7 @@ async def callback_handler(client, cb: CallbackQuery):
         await cb.answer(f"User: {cb.from_user.first_name}\nStatus: {status}", show_alert=True)
         
     elif data == "api_help":
-        help_text = "**⚙️ Commands:**\n`/setapi <key>`\n`/setwatermark <text>`\n`/settutorial <link>`\n`/addchannel <id>`"
+        help_text = "**⚙️ Commands:**\n`/setdomain <url>`\n`/setapi <key>`\n`/setwatermark <text>`\n`/settutorial <link>`\n`/addchannel <id>`"
         await cb.answer(help_text, show_alert=True)
 
     elif data == "request_movie":
@@ -714,7 +716,7 @@ async def cancel_request(client, cb: CallbackQuery):
 
 # --- Settings Commands ---
 
-@bot.on_message(filters.command(["setwatermark", "setapi", "settimer", "addchannel", "delchannel", "mychannels", "settutorial"]) & filters.private)
+@bot.on_message(filters.command(["setwatermark", "setapi", "setdomain", "settimer", "addchannel", "delchannel", "mychannels", "settutorial"]) & filters.private)
 @force_subscribe
 async def settings_commands(client, message: Message):
     cmd = message.command[0].lower()
@@ -725,6 +727,14 @@ async def settings_commands(client, message: Message):
         if text.lower() in ['none', 'off', 'clear']: text = ""
         await users_collection.update_one({'_id': uid}, {'$set': {'watermark_text': text}}, upsert=True)
         await message.reply_text(f"✅ Watermark set: `{text}`")
+
+    elif cmd == "setdomain":
+        if len(message.command) > 1:
+            domain = message.command[1].replace("https://", "").replace("http://", "").strip("/")
+            await users_collection.update_one({'_id': uid}, {'$set': {'shortener_url': domain}}, upsert=True)
+            await message.reply_text(f"✅ Shortener Domain Saved: `{domain}`")
+        else:
+            await message.reply_text("❌ Usage: `/setdomain shareus.io`")
 
     elif cmd == "setapi":
         if len(message.command) > 1:
@@ -1137,10 +1147,10 @@ async def repost_handler(client, cb: CallbackQuery):
         del user_conversations[uid]
 
 # ==============================================================================
-# 11. MAIN MESSAGE HANDLER (TEXT & FILES) - [UPDATED FOR DIRECT SEARCH]
+# 11. MAIN MESSAGE HANDLER (TEXT & FILES)
 # ==============================================================================
 
-@bot.on_message(filters.private & (filters.text | filters.video | filters.document | filters.photo) & ~filters.command(["start", "post", "manual", "addep", "cancel", "trending", "settings", "backup", "setwatermark", "setapi", "settimer", "addchannel", "delchannel", "mychannels", "settutorial", "stats", "broadcast", "addpremium", "rempremium"]))
+@bot.on_message(filters.private & (filters.text | filters.video | filters.document | filters.photo) & ~filters.command(["start", "post", "manual", "addep", "cancel", "trending", "settings", "backup", "setwatermark", "setapi", "setdomain", "settimer", "addchannel", "delchannel", "mychannels", "settutorial", "stats", "broadcast", "addpremium", "rempremium"]))
 async def main_conversation_handler(client, message: Message):
     uid = message.from_user.id
     convo = user_conversations.get(uid)
@@ -1150,12 +1160,11 @@ async def main_conversation_handler(client, message: Message):
         state = convo["state"]
         text = message.text
     else:
-        # If user sent text but isn't in any state, treat it as a direct movie search
         if message.text:
             state = "waiting_for_request"
             text = message.text
         else:
-            return # Ignore random files
+            return 
     
     # ---------------------------------------------------------
     # 🎬 NEW SMART AUTO-REPLY SYSTEM
@@ -1176,7 +1185,7 @@ async def main_conversation_handler(client, message: Message):
 
             # Step 2: Smart Regex Builder (Matches anywhere in the DB)
             clean_name = re.sub(r'[^a-zA-Z0-9\s]', ' ', corrected_title)
-            words = [w for w in clean_name.split() if len(w) > 1][:4] # limit to 4 words
+            words = [w for w in clean_name.split() if len(w) > 1][:4] 
             if not words: words = request_text.split()[:4]
             
             regex_pattern = "".join([f"(?=.*{re.escape(w)})" for w in words])
@@ -1206,7 +1215,7 @@ async def main_conversation_handler(client, message: Message):
                 return
         except Exception as e:
             logger.error(f"Auto Reply Error: {e}")
-            pass # Ignore and forward to admin
+            pass 
             
         # Step 4: If not found, forward to Admin
         req_entry = {
