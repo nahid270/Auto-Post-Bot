@@ -14,7 +14,8 @@
 # 8. ASYNC ANTI-LAG IMAGE PROCESSING.
 # 9. SMART AUTO-REPLY REQUEST SYSTEM (With Auto-Spell Checker)
 # 10. DIRECT TEXT SEARCH (No need to click "Request Movie" button!)
-# 11. [NEW] SET DOMAIN COMMAND (/setdomain) FOR URL SHORTENERS.
+# 11. SET DOMAIN COMMAND (/setdomain) FOR URL SHORTENERS.
+# 12. [FIXED] AUTO-SEARCH URL SHORTENER INTEGRATION FOR INCOME GENERATION.
 # ==============================================================================
 
 import os
@@ -1155,7 +1156,6 @@ async def main_conversation_handler(client, message: Message):
     uid = message.from_user.id
     convo = user_conversations.get(uid)
     
-    # [NEW] DIRECT TEXT SEARCH LOGIC
     if convo and "state" in convo:
         state = convo["state"]
         text = message.text
@@ -1167,7 +1167,7 @@ async def main_conversation_handler(client, message: Message):
             return 
     
     # ---------------------------------------------------------
-    # 🎬 NEW SMART AUTO-REPLY SYSTEM
+    # 🎬 NEW SMART AUTO-REPLY SYSTEM (WITH INCOME/SHORTENER FIX)
     # ---------------------------------------------------------
     if state == "waiting_for_request":
         request_text = text
@@ -1176,14 +1176,12 @@ async def main_conversation_handler(client, message: Message):
         msg = await message.reply_text("🔍 **আপনার মুভিটি আমাদের ডাটাবেসে খোঁজা হচ্ছে...**\n(দয়া করে অপেক্ষা করুন)")
         
         try:
-            # Step 1: TMDB Spell Check
             tmdb_results = await asyncio.to_thread(search_tmdb, request_text)
             if tmdb_results:
                 corrected_title = tmdb_results[0].get('title') or tmdb_results[0].get('name')
             else:
                 corrected_title = request_text
 
-            # Step 2: Smart Regex Builder (Matches anywhere in the DB)
             clean_name = re.sub(r'[^a-zA-Z0-9\s]', ' ', corrected_title)
             words = [w for w in clean_name.split() if len(w) > 1][:4] 
             if not words: words = request_text.split()[:4]
@@ -1191,7 +1189,6 @@ async def main_conversation_handler(client, message: Message):
             regex_pattern = "".join([f"(?=.*{re.escape(w)})" for w in words])
             query = {"caption": {"$regex": regex_pattern, "$options": "i"}}
             
-            # Step 3: Search DB
             found_files = await files_collection.find(query).to_list(length=10)
             
             if found_files:
@@ -1200,10 +1197,21 @@ async def main_conversation_handler(client, message: Message):
                     qual_match = re.search(r"Quality:\*\*\s*(.*?)\n", f.get('caption', ''))
                     qual = qual_match.group(1).strip() if qual_match else "Download"
                     
+                    # --- INCOME FIX: Using URL Shortener for Search Results ---
                     bot_uname = await get_bot_username()
-                    link = f"https://t.me/{bot_uname}?start={f['code']}"
+                    file_code = f['code']
                     
-                    buttons.append([InlineKeyboardButton(f"📥 {qual}", url=link)])
+                    if BLOG_URL and "http" in BLOG_URL:
+                        base_blog = BLOG_URL.rstrip("/")
+                        final_long_url = f"{base_blog}/?code={file_code}"
+                    else:
+                        final_long_url = f"https://t.me/{bot_uname}?start={file_code}"
+                    
+                    # Get the uploader's ID so the correct shortener is applied
+                    uploader_id = f.get('uploader_id', uid) 
+                    short_link = await shorten_link(uploader_id, final_long_url)
+                    
+                    buttons.append([InlineKeyboardButton(f"📥 {qual}", url=short_link)])
                     
                 await msg.edit_text(
                     f"✅ **খুশির খবর!**\nআপনি যেই মুভিটি খুঁজছেন, তা আমাদের কাছে আগে থেকেই আপলোড করা আছে।\n\n"
@@ -1217,7 +1225,6 @@ async def main_conversation_handler(client, message: Message):
             logger.error(f"Auto Reply Error: {e}")
             pass 
             
-        # Step 4: If not found, forward to Admin
         req_entry = {
             "user_id": uid,
             "user_name": message.from_user.first_name,
