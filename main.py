@@ -12,7 +12,8 @@
 # 6. AUTO YOUTUBE TRAILER FETCH & TRENDING MOVIES.
 # 7. SETTINGS DASHBOARD (/settings) & DATABASE BACKUP (/backup).
 # 8. ASYNC ANTI-LAG IMAGE PROCESSING.
-# 9. [NEW] SMART AUTO-REPLY REQUEST SYSTEM (With Auto-Spell Checker)
+# 9. SMART AUTO-REPLY REQUEST SYSTEM (With Auto-Spell Checker)
+# 10. [NEW] DIRECT TEXT SEARCH (No need to click "Request Movie" button!)
 # ==============================================================================
 
 import os
@@ -653,11 +654,10 @@ async def start_cmd(client, message: Message):
         ])
     else:
         status_text = "💎 **Premium User**" if is_premium else "👤 **Free User**"
-        welcome_text = f"👋 **Hello {user.first_name}!**\n\nYour Status: {status_text}\n\n👇 **Available Commands:**\n`/post <Name/Link>` - Auto Post (Supports IMDb/TMDB)\n`/manual` - Manual Post (Free for All)\n`/addep <Link>` - Add Episode to Old Post\n`/trending` - Get Trending Movies/Series"
+        welcome_text = f"👋 **Hello {user.first_name}!**\n\nYour Status: {status_text}\n\n👇 **Available Commands:**\n`/post <Name/Link>` - Auto Post (Supports IMDb/TMDB)\n`/manual` - Manual Post (Free for All)\n`/addep <Link>` - Add Episode to Old Post\n`/trending` - Get Trending Movies/Series\n\n🔍 **মুভি খুঁজতে সরাসরি মুভির নাম লিখে সেন্ড করুন!**"
         
         user_buttons = [
             [InlineKeyboardButton("👤 My Account", callback_data="my_account")],
-            [InlineKeyboardButton("🙏 Request Movie", callback_data="request_movie")]
         ]
         if not is_premium:
             user_buttons.insert(0, [InlineKeyboardButton("💎 Buy Premium Access", user_id=OWNER_ID)])
@@ -1137,7 +1137,7 @@ async def repost_handler(client, cb: CallbackQuery):
         del user_conversations[uid]
 
 # ==============================================================================
-# 11. MAIN MESSAGE HANDLER (TEXT & FILES)
+# 11. MAIN MESSAGE HANDLER (TEXT & FILES) - [UPDATED FOR DIRECT SEARCH]
 # ==============================================================================
 
 @bot.on_message(filters.private & (filters.text | filters.video | filters.document | filters.photo) & ~filters.command(["start", "post", "manual", "addep", "cancel", "trending", "settings", "backup", "setwatermark", "setapi", "settimer", "addchannel", "delchannel", "mychannels", "settutorial", "stats", "broadcast", "addpremium", "rempremium"]))
@@ -1145,11 +1145,17 @@ async def main_conversation_handler(client, message: Message):
     uid = message.from_user.id
     convo = user_conversations.get(uid)
     
-    if not convo or "state" not in convo:
-        return
-    
-    state = convo["state"]
-    text = message.text
+    # [NEW] DIRECT TEXT SEARCH LOGIC
+    if convo and "state" in convo:
+        state = convo["state"]
+        text = message.text
+    else:
+        # If user sent text but isn't in any state, treat it as a direct movie search
+        if message.text:
+            state = "waiting_for_request"
+            text = message.text
+        else:
+            return # Ignore random files
     
     # ---------------------------------------------------------
     # 🎬 NEW SMART AUTO-REPLY SYSTEM
@@ -1170,7 +1176,7 @@ async def main_conversation_handler(client, message: Message):
 
             # Step 2: Smart Regex Builder (Matches anywhere in the DB)
             clean_name = re.sub(r'[^a-zA-Z0-9\s]', ' ', corrected_title)
-            words = [w for w in clean_name.split() if len(w) > 1][:4] # limit to 4 words to be safe
+            words = [w for w in clean_name.split() if len(w) > 1][:4] # limit to 4 words
             if not words: words = request_text.split()[:4]
             
             regex_pattern = "".join([f"(?=.*{re.escape(w)})" for w in words])
@@ -1182,7 +1188,6 @@ async def main_conversation_handler(client, message: Message):
             if found_files:
                 buttons = []
                 for f in found_files:
-                    # Try to extract the quality from the caption string
                     qual_match = re.search(r"Quality:\*\*\s*(.*?)\n", f.get('caption', ''))
                     qual = qual_match.group(1).strip() if qual_match else "Download"
                     
@@ -1197,7 +1202,7 @@ async def main_conversation_handler(client, message: Message):
                     f"👇 নিচ থেকে সরাসরি ডাউনলোড করে নিন:",
                     reply_markup=InlineKeyboardMarkup(buttons)
                 )
-                del user_conversations[uid]
+                user_conversations.pop(uid, None)
                 return
         except Exception as e:
             logger.error(f"Auto Reply Error: {e}")
@@ -1219,7 +1224,7 @@ async def main_conversation_handler(client, message: Message):
             )
             
         await msg.edit_text("⏳ **মুভিটি আমাদের ডাটাবেসে পাওয়া যায়নি।**\n\nআপনার রিকোয়েস্টটি অ্যাডমিনদের কাছে পাঠানো হয়েছে। খুব দ্রুত এটি আপলোড করা হবে!")
-        del user_conversations[uid]
+        user_conversations.pop(uid, None)
         return
 
     # ---------------------------------------------------------
@@ -1232,7 +1237,7 @@ async def main_conversation_handler(client, message: Message):
             try: await message.copy(chat_id=u['_id']); await asyncio.sleep(0.05)
             except: pass
         await msg.edit_text("✅ Broadcast complete.")
-        del user_conversations[uid]
+        user_conversations.pop(uid, None)
         return
         
     elif state == "admin_add_prem_wait":
@@ -1241,7 +1246,7 @@ async def main_conversation_handler(client, message: Message):
             await users_collection.update_one({'_id': int(text)}, {'$set': {'is_premium': True}}, upsert=True)
             await message.reply_text(f"✅ Premium Added to ID: `{text}`")
         except: await message.reply_text("❌ Invalid ID.")
-        del user_conversations[uid]
+        user_conversations.pop(uid, None)
         return
         
     elif state == "admin_rem_prem_wait":
@@ -1250,7 +1255,7 @@ async def main_conversation_handler(client, message: Message):
             await users_collection.update_one({'_id': int(text)}, {'$set': {'is_premium': False}})
             await message.reply_text(f"✅ Premium Removed from ID: `{text}`")
         except: await message.reply_text("❌ Invalid ID.")
-        del user_conversations[uid]
+        user_conversations.pop(uid, None)
         return
 
     if state == "wait_batch_season_input":
@@ -1631,7 +1636,7 @@ async def close_post_handler(client, cb: CallbackQuery):
         if local_path and os.path.exists(local_path):
             try: os.remove(local_path)
             except: pass     
-        del user_conversations[uid]
+        user_conversations.pop(uid, None)
         
     await cb.message.delete()
     await cb.answer("✅ Session Closed.", show_alert=True)
