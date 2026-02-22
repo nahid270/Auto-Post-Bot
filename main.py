@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 # ==============================================================================
-# 🎬 ULTIMATE MOVIE BOT - PREMIUM EDITION (WITH SMART BULK & FOLDER SYSTEM)
+# 🎬 ULTIMATE MOVIE BOT - PREMIUM EDITION (WITH BLOGGER REDIRECT & REPOST SYSTEM)
 # ==============================================================================
 # Update Log:
 # 1. Added Rich Caption Support for Files.
@@ -16,9 +16,10 @@
 # 10. DIRECT TEXT SEARCH (No need to click "Request Movie" button!)
 # 11. SET DOMAIN COMMAND (/setdomain) FOR URL SHORTENERS.
 # 12. [FIXED] AUTO-SEARCH URL SHORTENER INTEGRATION FOR INCOME GENERATION.
-# 13. [NEW] SMART BULK UPLOAD (Auto-Detect Qualities & Episodes).
-# 14. [NEW] WEB SERIES QUALITY FOLDER SYSTEM (Deep Linking).
-# 15. [NEW] AUTO SEND FOLDER FILES (No multiple clicks needed).
+# 13. [NEW] ULTRA AUTO-PILOT: Just forward files to generate the whole post!
+# 14. [NEW] EPISODE RANGE DETECTION: Auto parses "Ep 1-4" from file names.
+# 15. [NEW] WEB SERIES QUALITY FOLDER SYSTEM (Deep Linking).
+# 16. [NEW] AUTO SEND FOLDER FILES (No multiple clicks needed).
 # ==============================================================================
 
 import os
@@ -653,7 +654,7 @@ async def start_cmd(client, message: Message):
             else:
                 await message.reply_text("❌ **Folder Link Expired or Invalid.**")
             return
-            
+
         # 📄 ORIGINAL SINGLE FILE RETRIEVAL
         file_data = await files_collection.find_one({"code": code})
         
@@ -949,12 +950,15 @@ async def media_selected(client, cb: CallbackQuery):
     if not details: return await cb.answer("Error fetching details!", show_alert=True)
     
     uid = cb.from_user.id
-    user_conversations[uid] = {
+    if uid not in user_conversations:
+        user_conversations[uid] = {}
+        
+    user_conversations[uid].update({
         "details": details,
         "links": {},
         "state": "wait_lang",
         "is_manual": False
-    }
+    })
     
     langs = [["English", "Hindi"], ["Bengali", "Dual Audio"]]
     buttons = [[InlineKeyboardButton(l, callback_data=f"lang_{l}") for l in row] for row in langs]
@@ -973,7 +977,11 @@ async def language_selected(client, cb: CallbackQuery):
         return
 
     user_conversations[uid]["language"] = data
-    await show_upload_panel(cb.message, uid, is_edit=True)
+    
+    if user_conversations[uid].get("auto_queue_active"):
+        await process_auto_queue_files(client, cb, uid)
+    else:
+        await show_upload_panel(cb.message, uid, is_edit=True)
 
 async def show_upload_panel(message, uid, is_edit=False):
     convo = user_conversations.get(uid, {})
@@ -1077,91 +1085,6 @@ async def add_custom_btn_handler(client, cb: CallbackQuery):
     user_conversations[uid]["state"] = "wait_custom_btn_name"
     await cb.message.edit_text("📝 **Enter Custom Button Name:**\n(e.g. Episode 1, Zip File)")
 
-# --- SMART BULK UPLOAD HANDLERS ---
-@bot.on_callback_query(filters.regex("^smart_bulk"))
-async def smart_bulk_handler(client, cb: CallbackQuery):
-    uid = cb.from_user.id
-    user_conversations[uid]["state"] = "wait_smart_bulk"
-    user_conversations[uid]["bulk_queue"] = [] 
-    
-    await cb.message.edit_text(
-        "🚀 **Smart Bulk Auto-Detect Mode Active!**\n\n"
-        "👉 **একসাথে ১০-৫০ টি ফাইল ফরওয়ার্ড বা সেন্ড করুন।**\n"
-        "🤖 বট অটোমেটিক ফাইলের নাম পড়ে 480p/720p/1080p এবং এপিসোড নাম্বার আলাদা করে ফোল্ডার বানিয়ে নেবে!\n\n"
-        "⏳ **সবগুলো ফাইল দেওয়া শেষ হলে নিচের 'Start Processing' বাটনে ক্লিক করুন:**",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ সব ফাইল দেওয়া শেষ (Start Processing)", callback_data="process_smart_bulk")]])
-    )
-
-@bot.on_callback_query(filters.regex("^process_smart_bulk"))
-async def process_smart_bulk(client, cb: CallbackQuery):
-    uid = cb.from_user.id
-    convo = user_conversations.get(uid)
-    
-    if not convo or "bulk_queue" not in convo or not convo["bulk_queue"]:
-        return await cb.answer("❌ কোনো ফাইল পাওয়া যায়নি!", show_alert=True)
-    
-    queue = convo["bulk_queue"]
-    total_files = len(queue)
-    status_msg = await cb.message.edit_text(f"🔄 **Smart Processing Started...**\nTotal Files: {total_files}\nদয়া করে অপেক্ষা করুন...")
-    
-    details = convo['details']
-    title = details.get('title') or details.get('name') or "Unknown"
-    year = (details.get("release_date") or details.get("first_air_date") or "----")[:4]
-    lang = convo.get("language", "Unknown")
-    user_data = await users_collection.find_one({'_id': uid})
-    
-    if 'links' not in convo: convo['links'] = {}
-    
-    success_count = 0
-    for idx, msg in enumerate(queue, 1):
-        try:
-            file_name = "Unknown"
-            if msg.video and msg.video.file_name: file_name = msg.video.file_name
-            elif msg.document and msg.document.file_name: file_name = msg.document.file_name
-            
-            # Detect Quality
-            qual_match = re.search(r'(1080p|720p|480p|1440p|2160p|4k)', file_name, re.IGNORECASE)
-            quality = qual_match.group(1).lower() if qual_match else "HD"
-            
-            # Detect Episode
-            ep_match = re.search(r'(?i)(?:e|ep|episode)[\s\-\.]*(\d+)', file_name)
-            btn_name = f"Episode {int(ep_match.group(1))}" if ep_match else f"Part {idx}"
-            
-            log_msg = await msg.copy(chat_id=LOG_CHANNEL_ID, caption=f"#SMART_BACKUP\nUser: {uid}\nQuality: {quality} | {btn_name}")
-            backup_file_id = log_msg.video.file_id if log_msg.video else log_msg.document.file_id
-            
-            file_caption = (
-                f"🎬 **{title} ({year})**\n🔰 **Quality:** {quality} ({btn_name})\n"
-                f"🔊 **Language:** {lang}\n━━━━━━━━━━━━━━━━━━\n🤖 @{await get_bot_username()}"
-            )
-            code = generate_random_code()
-            
-            await files_collection.insert_one({
-                "code": code, "file_id": backup_file_id, "log_msg_id": log_msg.id,
-                "caption": file_caption, "delete_timer": user_data.get('delete_timer', 0),
-                "uploader_id": uid, "created_at": datetime.now()
-            })
-            
-            bot_uname = await get_bot_username()
-            final_long_url = f"{BLOG_URL.rstrip('/')}/?code={code}" if BLOG_URL and "http" in BLOG_URL else f"https://t.me/{bot_uname}?start={code}"
-            short_link = await shorten_link(uid, final_long_url)
-            
-            if quality not in convo['links']: convo['links'][quality] = []
-            convo['links'][quality].append({"name": btn_name, "link": short_link, "file_code": code})
-            
-            success_count += 1
-            if idx % 3 == 0: await status_msg.edit_text(f"🔄 **Smart Processing...**\n✅ Processed: {idx}/{total_files}\nদয়া করে অপেক্ষা করুন...")
-            await asyncio.sleep(1.2) # Avoid Telegram FloodWait
-            
-        except FloodWait as e: await asyncio.sleep(e.value + 2)
-        except Exception as e: logger.error(f"Smart Bulk Error: {e}")
-
-    convo["bulk_queue"] = []
-    convo["state"] = "wait_panel"
-    await status_msg.edit_text("✅ **All Files Processed Successfully!**")
-    await asyncio.sleep(1)
-    await show_upload_panel(status_msg, uid, is_edit=True)
-
 @bot.on_callback_query(filters.regex("^up_"))
 async def upload_request(client, cb: CallbackQuery):
     qual = cb.data.split("_")[1]
@@ -1187,6 +1110,138 @@ async def badge_menu_handler(client, cb: CallbackQuery):
 async def back_button(client, cb: CallbackQuery):
     uid = cb.from_user.id
     await show_upload_panel(cb.message, uid, is_edit=True)
+
+# ==============================================================================
+# 9.5 SMART BULK UPLOAD & AUTO-PILOT LOGIC (MAGIC FILE PROCESSING)
+# ==============================================================================
+
+@bot.on_callback_query(filters.regex("^smart_bulk"))
+async def smart_bulk_handler(client, cb: CallbackQuery):
+    uid = cb.from_user.id
+    user_conversations[uid]["state"] = "wait_smart_bulk"
+    user_conversations[uid]["bulk_queue"] = [] 
+    
+    await cb.message.edit_text(
+        "🚀 **Smart Bulk Auto-Detect Mode Active!**\n\n"
+        "👉 **একসাথে ১০-৫০ টি ফাইল ফরওয়ার্ড বা সেন্ড করুন।**\n"
+        "🤖 বট অটোমেটিক ফাইলের নাম পড়ে 480p/720p/1080p এবং এপিসোড নাম্বার আলাদা করে ফোল্ডার বানিয়ে নেবে!\n\n"
+        "⏳ **সবগুলো ফাইল দেওয়া শেষ হলে নিচের 'Start Processing' বাটনে ক্লিক করুন:**",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ সব ফাইল দেওয়া শেষ (Start Processing)", callback_data="process_smart_bulk")]])
+    )
+
+@bot.on_callback_query(filters.regex("^start_auto_process"))
+async def start_auto_process(client, cb: CallbackQuery):
+    uid = cb.from_user.id
+    convo = user_conversations.get(uid)
+    if not convo or not convo.get("auto_queue"): return await cb.answer("❌ Queue is empty!", show_alert=True)
+        
+    first_file = convo["auto_queue"][0]
+    fname = first_file.video.file_name if first_file.video and first_file.video.file_name else first_file.document.file_name if first_file.document and first_file.document.file_name else ""
+    
+    # MAGIC REGEX TO EXTRACT CLEAN TITLE
+    clean_title = re.sub(r'(\[.*?\]|\(.*?\))', '', fname)
+    clean_title = re.sub(r'(?i)(1080p|720p|480p|1440p|2160p|4k|360p|x264|x265|hevc|web-dl|webrip|bluray|hdtv|dual|audio|hin|eng|tam|tel|sub)', '', clean_title)
+    clean_title = re.sub(r'(?i)(s\d+|e\d+|ep\d+|season\s*\d+|episode\s*\d+)', '', clean_title)
+    clean_title = re.sub(r'(19\d{2}|20\d{2})', '', clean_title)
+    clean_title = re.sub(r'[\.\-\_]', ' ', clean_title)
+    clean_title = " ".join(clean_title.split()[:4]).strip()
+    
+    if not clean_title: clean_title = "Movie"
+    convo["auto_queue_active"] = True
+    
+    await cb.message.edit_text(f"🔍 **Auto-Detecting:** `{clean_title}`\nSearching TMDB...")
+    results = await asyncio.to_thread(search_tmdb, clean_title)
+    
+    if not results: return await cb.message.edit_text(f"❌ Could not find TMDB match for `{clean_title}`.\nPlease use `/post Name` to search manually.")
+    buttons = [[InlineKeyboardButton(f"🎬 {r.get('title') or r.get('name')} ({(r.get('release_date') or r.get('first_air_date') or '----')[:4]})", callback_data=f"sel_{r.get('media_type', 'movie')}_{r['id']}")] for r in results]
+    await cb.message.edit_text(f"✅ **Auto-Detected! Please confirm the correct Movie/Series:**", reply_markup=InlineKeyboardMarkup(buttons))
+
+async def process_auto_queue_files(client, cb, uid):
+    convo = user_conversations.get(uid)
+    queue = convo.get("auto_queue", [])
+    if not queue: queue = convo.get("bulk_queue", [])
+    
+    total_files = len(queue)
+    status_msg = await cb.message.edit_text(f"🔄 **Auto-Processing {total_files} Files...**\nদয়া করে অপেক্ষা করুন...")
+    
+    details = convo['details']
+    title = details.get('title') or details.get('name') or "Unknown"
+    year = (details.get("release_date") or details.get("first_air_date") or "----")[:4]
+    lang = convo.get("language", "Unknown")
+    user_data = await users_collection.find_one({'_id': uid})
+    
+    if 'links' not in convo: convo['links'] = {}
+    
+    success_count = 0
+    for idx, msg in enumerate(queue, 1):
+        try:
+            file_name = "Unknown"
+            if msg.video and msg.video.file_name: file_name = msg.video.file_name
+            elif msg.document and msg.document.file_name: file_name = msg.document.file_name
+            
+            # Detect Quality
+            qual_match = re.search(r'(1080p|720p|480p|1440p|2160p|4k)', file_name, re.IGNORECASE)
+            quality = qual_match.group(1).lower() if qual_match else "HD"
+            
+            # 🌟 MAGIC REGEX TO CATCH EPISODE RANGES LIKE "Ep 1-4" or "E05"
+            ep_match = re.search(r'(?i)(?:e|ep|episode|part)[\s\-\._]*(\d+(?:\s*[\-\~]\s*\d+)?)', file_name)
+            if ep_match:
+                btn_name = f"Episode {ep_match.group(1).replace(' ', '').replace('~', '-')}"
+            else:
+                btn_name = f"Part {idx}"
+            
+            log_msg = await msg.copy(chat_id=LOG_CHANNEL_ID, caption=f"#SMART_BACKUP\nUser: {uid}\nQuality: {quality} | {btn_name}")
+            backup_file_id = log_msg.video.file_id if log_msg.video else log_msg.document.file_id
+            
+            file_caption = (
+                f"🎬 **{title} ({year})**\n🔰 **Quality:** {quality} ({btn_name})\n"
+                f"🔊 **Language:** {lang}\n━━━━━━━━━━━━━━━━━━\n🤖 @{await get_bot_username()}"
+            )
+            code = generate_random_code()
+            
+            await files_collection.insert_one({
+                "code": code, "file_id": backup_file_id, "log_msg_id": log_msg.id,
+                "caption": file_caption, "delete_timer": user_data.get('delete_timer', 0),
+                "uploader_id": uid, "created_at": datetime.now()
+            })
+            
+            bot_uname = await get_bot_username()
+            final_long_url = f"{BLOG_URL.rstrip('/')}/?code={code}" if BLOG_URL and "http" in BLOG_URL else f"https://t.me/{bot_uname}?start={code}"
+            short_link = await shorten_link(uid, final_long_url)
+            
+            if quality not in convo['links']: convo['links'][quality] = []
+            convo['links'][quality].append({"name": btn_name, "link": short_link, "file_code": code})
+            
+            success_count += 1
+            if idx % 2 == 0: await status_msg.edit_text(f"🔄 **Smart Processing...**\n✅ Processed: {idx}/{total_files}\nদয়া করে অপেক্ষা করুন...")
+            await asyncio.sleep(1.2) # Avoid Telegram FloodWait
+            
+        except FloodWait as e: await asyncio.sleep(e.value + 2)
+        except Exception as e: logger.error(f"Smart Bulk Error: {e}")
+
+    convo["bulk_queue"] = []
+    convo["auto_queue"] = []
+    
+    if convo.get("auto_queue_active"):
+        convo["auto_queue_active"] = False
+        await status_msg.edit_text("✅ **Files Processed! Generating Final Post...**")
+        class FakeCB:
+            def __init__(self, from_user, message): self.from_user, self.message = from_user, message
+            async def answer(self, text, show_alert=False): pass
+        await process_final_post(client, FakeCB(cb.from_user, status_msg))
+    else:
+        convo["state"] = "wait_panel"
+        await status_msg.edit_text("✅ **All Files Processed Successfully!**")
+        await asyncio.sleep(1)
+        await show_upload_panel(status_msg, uid, is_edit=True)
+
+@bot.on_callback_query(filters.regex("^process_smart_bulk"))
+async def trigger_process_smart_bulk(client, cb: CallbackQuery):
+    uid = cb.from_user.id
+    convo = user_conversations.get(uid)
+    if not convo or "bulk_queue" not in convo or not convo["bulk_queue"]:
+        return await cb.answer("❌ কোনো ফাইল পাওয়া যায়নি!", show_alert=True)
+    await process_auto_queue_files(client, cb, uid)
 
 # ==============================================================================
 # 10. ADD EPISODE (EDIT) & REPOST SYSTEM
@@ -1309,14 +1364,42 @@ async def main_conversation_handler(client, message: Message):
             state = "waiting_for_request"
             text = message.text
         else:
-            return 
-
-    # --- NEW: Smart Bulk Queue Handler ---
-    if state == "wait_smart_bulk":
-        if message.video or message.document:
+            state = None
+            text = None
+            
+    # ---------------------------------------------------------
+    # 🚀 NEW: ULTRA AUTO-PILOT QUEUE SYSTEM & SMART BULK
+    # ---------------------------------------------------------
+    if message.video or message.document:
+        if state in [None, "waiting_for_request", "auto_file_queue"]:
+            if uid not in user_conversations:
+                user_conversations[uid] = {}
+            convo = user_conversations[uid]
+            convo["state"] = "auto_file_queue"
+            if "auto_queue" not in convo:
+                convo["auto_queue"] = []
+            convo["auto_queue"].append(message)
+            
+            reply_text = f"📥 **{len(convo['auto_queue'])} Files Received!**\n\n👉 Send more files or click the button below to Auto-Process!"
+            markup = InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Start Auto-Process", callback_data="start_auto_process")]])
+            
+            if "auto_msg_id" in convo:
+                try:
+                    await client.edit_message_text(chat_id=uid, message_id=convo["auto_msg_id"], text=reply_text, reply_markup=markup)
+                except MessageNotModified:
+                    pass
+            else:
+                msg = await message.reply_text(reply_text, reply_markup=markup)
+                convo["auto_msg_id"] = msg.id
+            return
+            
+        elif state == "wait_smart_bulk":
             convo.setdefault("bulk_queue", []).append(message)
-        return
+            return
     
+    if not text:
+        return
+        
     # ---------------------------------------------------------
     # 🎬 SMART AUTO-REPLY SYSTEM (WITH INCOME/SHORTENER FIX)
     # ---------------------------------------------------------
@@ -1502,7 +1585,14 @@ async def main_conversation_handler(client, message: Message):
     elif state == "wait_custom_lang":
         convo["language"] = text
         await message.reply_text(f"✅ Language Set: **{text}**")
-        await show_upload_panel(message, uid, is_edit=False)
+        
+        if convo.get("auto_queue_active"):
+            class DummyCB:
+                message = message
+                from_user = message.from_user
+            await process_auto_queue_files(client, DummyCB(), uid)
+        else:
+            await show_upload_panel(message, uid, is_edit=False)
 
     elif state == "wait_badge_text":
         convo["temp_badge_text"] = text
@@ -1711,7 +1801,7 @@ async def process_final_post(client, cb: CallbackQuery):
     if not convo: return await cb.answer("Session expired.", show_alert=True)
     if not convo.get('links'): return await cb.answer("❌ No files uploaded!", show_alert=True)
         
-    await cb.message.edit_text("🖼️ **Generating Post... Please wait...**")
+    await cb.message.edit_text("🖼️ **Generating Post & Folders... Please wait...**")
     
     details = convo['details']
     m_type = details.get('media_type', 'movie')
@@ -1728,11 +1818,12 @@ async def process_final_post(client, cb: CallbackQuery):
     )
     
     buttons = []
-    priority = ["480p", "720p", "1080p"]
+    priority = ["480p", "720p", "1080p", "1440p", "2160p", "4k"]
     
     def sort_key(k):
-        if k in priority: return priority.index(k)
-        nums = re.findall(r'\d+', k)
+        kl = k.lower()
+        if kl in priority: return priority.index(kl)
+        nums = re.findall(r'\d+', kl)
         if nums:
             try: return 100 + int(nums[-1])
             except: return 200
@@ -1751,14 +1842,14 @@ async def process_final_post(client, cb: CallbackQuery):
             btn_name = files[0]['name']
 
             btn_text = qual
-            if qual in priority:
+            if qual.lower() in priority:
                 btn_text = f"📥 Download {qual}"
             elif "Episode" in qual:
                 btn_text = qual.replace("Episode", "Ep")
             else:
                 btn_text = btn_name
 
-            if qual in priority:
+            if qual.lower() in priority:
                 if temp_row:
                     buttons.append(temp_row)
                     temp_row = []
@@ -1791,7 +1882,7 @@ async def process_final_post(client, cb: CallbackQuery):
 
             short_link = await shorten_link(uid, final_long_url)
 
-            folder_text = f"📁 {qual} Web Series (Folder)" if qual in priority else f"📁 {qual} (Folder)"
+            folder_text = f"📁 {qual} Web Series (Folder)" if qual.lower() in priority else f"📁 {qual} (Folder)"
             buttons.append([InlineKeyboardButton(folder_text, url=short_link)])
             
     if temp_row: buttons.append(temp_row)
