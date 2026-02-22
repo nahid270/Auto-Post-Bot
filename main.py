@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 
 # ==============================================================================
-# 🎬 ULTIMATE MOVIE BOT - PREMIUM EDITION (WITH BLOGGER REDIRECT & REPOST SYSTEM)
+# 🎬 ULTIMATE MOVIE BOT - PREMIUM EDITION (WITH BATCH FOLDER SYSTEM)
 # ==============================================================================
 # Update Log:
 # 1. Added Rich Caption Support for Files.
-# 2. BATCH UPLOAD WITH OPTIONAL SEASON TAG.
+# 2. BATCH UPLOAD WITH QUALITY FOLDER SYSTEM (Deep Linking).
 # 3. BLOGGER/WEBSITE REDIRECT SUPPORT (Anti-Ban Link System).
 # 4. ADD EPISODE TO OLD POST & REPOST SYSTEM.
 # 5. GLOBAL CANCEL COMMAND (/cancel).
@@ -15,7 +15,7 @@
 # 9. SMART AUTO-REPLY REQUEST SYSTEM (With Auto-Spell Checker & Genre/Lang display)
 # 10. DIRECT TEXT SEARCH (No need to click "Request Movie" button!)
 # 11. SET DOMAIN COMMAND (/setdomain) FOR URL SHORTENERS.
-# 12. [FIXED] AUTO-SEARCH URL SHORTENER INTEGRATION FOR INCOME GENERATION.
+# 12. [NEW] QUALITY BASED WEB SERIES FOLDER SYSTEM.
 # ==============================================================================
 
 import os
@@ -88,6 +88,7 @@ db = db_client[DB_NAME]
 users_collection = db.users
 files_collection = db.files
 requests_collection = db.requests 
+batches_collection = db.batches # NEW: For Web Series Folders
 
 # Global Variables
 user_conversations = {}
@@ -596,11 +597,38 @@ async def start_cmd(client, message: Message):
     uid = user.id
     await add_user_to_db(user)
     
-    # --- FILE RETRIEVAL SYSTEM ---
+    # --- FILE & FOLDER RETRIEVAL SYSTEM ---
     if len(message.command) > 1:
         code = message.command[1]
-        file_data = await files_collection.find_one({"code": code})
         
+        # 📁 FOLDER RETRIEVAL (Web Series Batches)
+        if code.startswith("b_"):
+            batch_data = await batches_collection.find_one({"batch_code": code})
+            if batch_data:
+                msg = await message.reply_text("📂 **আপনার ফোল্ডারটি ওপেন হচ্ছে...**")
+                
+                title = batch_data.get('title', 'Web Series')
+                qual = batch_data.get('quality', 'Files')
+                files = batch_data.get('files', [])
+                
+                text = f"📁 **{title}**\n🔰 **কোয়ালিটি:** {qual}\n\n👇 **নিচ থেকে আপনার এপিসোডটি সিলেক্ট করুন:**"
+                
+                ep_buttons = []
+                row = []
+                for f in files:
+                    row.append(InlineKeyboardButton(f.get('name', 'Episode'), url=f.get('link')))
+                    if len(row) == 2:
+                        ep_buttons.append(row)
+                        row = []
+                if row: ep_buttons.append(row)
+                    
+                await msg.edit_text(text, reply_markup=InlineKeyboardMarkup(ep_buttons))
+            else:
+                await message.reply_text("❌ **Folder Link Expired or Invalid.**")
+            return
+
+        # 📄 SINGLE FILE RETRIEVAL
+        file_data = await files_collection.find_one({"code": code})
         if file_data:
             msg = await message.reply_text("📂 **Fetching your file...**")
             log_msg_id = file_data.get("log_msg_id")
@@ -883,7 +911,7 @@ async def manual_type_handler(client, cb: CallbackQuery):
     await cb.message.edit_text(f"📝 **Step 1:** Send the **Title** of the {m_type}.")
 
 # ==============================================================================
-# 9. UPLOAD PANEL & HANDLERS
+# 9. UPLOAD PANEL & HANDLERS (FOLDER SYSTEM ENABLED)
 # ==============================================================================
 
 @bot.on_callback_query(filters.regex("^sel_"))
@@ -925,10 +953,7 @@ async def show_upload_panel(message, uid, is_edit=False):
     season_tag = convo.get("batch_season_prefix", None)
     
     if is_batch:
-        if season_tag:
-            batch_text = f"🟢 Batch ON ({season_tag})"
-        else:
-            batch_text = "🟢 Batch Mode: ON"
+        batch_text = f"🔴 Turn Batch OFF ({season_tag if season_tag else 'Active'})"
     else:
         batch_text = "📦 Start Batch/Season Upload"
     
@@ -947,15 +972,19 @@ async def show_upload_panel(message, uid, is_edit=False):
     links = convo.get('links', {})
     badge = convo.get('temp_badge_text', 'None')
     
-    status_text = "\n".join([f"✅ **{k}** Added" for k in links.keys()])
-    if not status_text: status_text = "No files added yet."
+    status_lines = []
+    for q, files in links.items():
+        if isinstance(files, list) and len(files) > 0:
+            if len(files) == 1:
+                status_lines.append(f"✅ **{q}** Added (1 File)")
+            else:
+                status_lines.append(f"📁 **{q}** ➔ {len(files)} File(s) [Folder Mode]")
+                
+    status_text = "\n".join(status_lines) if status_lines else "No files added yet."
     
     mode_text = ""
     if is_batch:
-        if season_tag:
-            mode_text = f"🟢 **BATCH MODE ACTIVE**\nFiles will be named: **{season_tag} E1, {season_tag} E2...**"
-        else:
-            mode_text = "🟢 **BATCH MODE ACTIVE**\nFiles will be named: **Episode 1, Episode 2...**"
+        mode_text = f"🟢 **BATCH MODE ACTIVE**\nClick a Quality below to upload multiple episodes into its folder!"
 
     text = (f"📂 **File Manager**\n{mode_text}\n\n{status_text}\n\n"
             f"🏷 **Badge:** {badge}\n\n"
@@ -975,6 +1004,7 @@ async def toggle_batch_handler(client, cb: CallbackQuery):
     if convo.get("is_batch_mode", False):
         convo["is_batch_mode"] = False
         convo["batch_season_prefix"] = None 
+        convo["episode_counts"] = {}
         await cb.answer("🔴 Batch Mode Disabled.", show_alert=True)
         await show_upload_panel(cb.message, uid, is_edit=True)
     else:
@@ -982,7 +1012,7 @@ async def toggle_batch_handler(client, cb: CallbackQuery):
         await cb.message.edit_text(
             "📝 **Enter Season Number (Optional)**\n\n"
             "👉 Type a prefix like `S1`, `S01` or `Season 1`.\n"
-            "Buttons will look like: **S1 E1**, **S1 E2** etc.\n\n"
+            "Episodes will look like: **S1 E1**, **S1 E2** etc.\n\n"
             "👇 **Click Skip** to use default (**Episode 1**).",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("⏭ SKIP (Default)", callback_data="batch_skip_season")],
@@ -997,15 +1027,13 @@ async def batch_skip_season_handler(client, cb: CallbackQuery):
     
     convo["batch_season_prefix"] = None 
     convo["is_batch_mode"] = True
-    convo["episode_count"] = 1
-    convo["current_quality"] = "batch" 
-    convo["state"] = "wait_file_upload"
+    convo["episode_counts"] = {}
     
     await cb.message.edit_text(
         "🟢 **Batch Mode Active (Default)**\n\n"
-        "👉 **Send files now.**\n"
+        "👉 **Now click a Quality (e.g. 720p) from the panel to upload episodes!**\n"
         "Naming: **Episode 1, Episode 2...**",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Stop Batch", callback_data="back_panel")]])
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Panel", callback_data="back_panel")]])
     )
 
 @bot.on_callback_query(filters.regex("^add_custom_btn"))
@@ -1022,11 +1050,14 @@ async def upload_request(client, cb: CallbackQuery):
     user_conversations[uid]["current_quality"] = qual
     user_conversations[uid]["state"] = "wait_file_upload"
     
+    is_batch = user_conversations[uid].get("is_batch_mode", False)
+    mode_text = "Batch/Folder Mode" if is_batch else "Single File Mode"
+    
     await cb.message.edit_text(
-        f"📤 **Upload Mode: {qual}**\n\n"
-        "👉 **Forward** or **Send** the video file here.\n"
+        f"📤 **Upload Mode: {qual} ({mode_text})**\n\n"
+        "👉 **Forward** or **Send** the video file(s) here.\n"
         "🤖 Bot will backup to Log Channel & create a Short Link.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back_panel")]])
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back / Finish", callback_data="back_panel")]])
     )
 
 @bot.on_callback_query(filters.regex("^set_badge"))
@@ -1038,9 +1069,6 @@ async def badge_menu_handler(client, cb: CallbackQuery):
 @bot.on_callback_query(filters.regex("^back_panel"))
 async def back_button(client, cb: CallbackQuery):
     uid = cb.from_user.id
-    if uid in user_conversations:
-        user_conversations[uid]["is_batch_mode"] = False
-        user_conversations[uid]["batch_season_prefix"] = None
     await show_upload_panel(cb.message, uid, is_edit=True)
 
 # ==============================================================================
@@ -1294,16 +1322,15 @@ async def main_conversation_handler(client, message: Message):
         prefix = text.strip()
         convo["batch_season_prefix"] = prefix
         convo["is_batch_mode"] = True
-        convo["episode_count"] = 1
-        convo["current_quality"] = "batch"
-        convo["state"] = "wait_file_upload"
+        convo["episode_counts"] = {}
+        convo["state"] = "wait_panel"
         
         await message.reply_text(
             f"🟢 **Batch Mode Active**\nPrefix: `{prefix}`\n\n"
-            f"👉 **Send files now.**\n"
+            f"👉 **Now click a Quality (e.g. 720p) from the panel to upload episodes!**\n"
             f"Naming: **{prefix} E1, {prefix} E2...**",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Stop Batch", callback_data="back_panel")]])
         )
+        await show_upload_panel(message, uid, is_edit=False)
         return
 
     if state == "wait_manual_title":
@@ -1449,20 +1476,23 @@ async def main_conversation_handler(client, message: Message):
             return await message.reply_text("❌ Please send a **Video** or **Document** file.")
         
         is_batch = convo.get("is_batch_mode", False)
+        current_qual = convo.get("current_quality", "custom")
         
+        if current_qual not in convo.get("episode_counts", {}):
+            if "episode_counts" not in convo:
+                convo["episode_counts"] = {}
+            convo["episode_counts"][current_qual] = 1
+
+        count = convo["episode_counts"][current_qual]
+
         if is_batch:
-            count = convo.get("episode_count", 1)
             season_prefix = convo.get("batch_season_prefix", None)
-            
-            if season_prefix:
-                btn_name = f"{season_prefix} E{count}" 
-            else:
-                btn_name = f"Episode {count}" 
-        
-        elif convo["current_quality"] == "custom": 
-            btn_name = convo["temp_btn_name"]
-        else: 
-            btn_name = convo["current_quality"]
+            btn_name = f"{season_prefix} E{count}" if season_prefix else f"Episode {count}"
+        elif current_qual == "custom":
+            btn_name = convo.get("temp_btn_name", "Custom")
+            current_qual = btn_name 
+        else:
+            btn_name = current_qual
         
         status_msg = await message.reply_text(f"🔄 **Processing '{btn_name}'...**")
         
@@ -1518,15 +1548,22 @@ async def main_conversation_handler(client, message: Message):
             
             short_link = await shorten_link(uid, final_long_url)
             
-            convo['links'][btn_name] = short_link
+            # 🆕 FOLDER SAVING LOGIC
+            if 'links' not in convo: convo['links'] = {}
+            if current_qual not in convo['links']: convo['links'][current_qual] = []
+
+            convo['links'][current_qual].append({
+                "name": btn_name,
+                "link": short_link
+            })
             
             await message.delete()
             
             if is_batch:
-                convo["episode_count"] += 1
+                convo["episode_counts"][current_qual] += 1
                 await status_msg.edit_text(
-                    f"✅ **{btn_name} Saved!**\n\n👇 **Send Next Episode...**\n(Or click Stop to finish)",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Stop / Finish Batch", callback_data="back_panel")]])
+                    f"✅ **{btn_name} ({current_qual}) Saved!**\n\n👇 **পরবর্তী এপিসোড সেন্ড করুন...**\n(Or click Finish to return)",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Finish & Return", callback_data="back_panel")]])
                 )
             else:
                 await show_upload_panel(status_msg, uid, is_edit=False)
@@ -1545,15 +1582,14 @@ async def process_final_post(client, cb: CallbackQuery):
     convo = user_conversations.get(uid)
     
     if not convo: return await cb.answer("Session expired.", show_alert=True)
-    if not convo['links']: return await cb.answer("❌ No files uploaded!", show_alert=True)
+    if not convo.get('links'): return await cb.answer("❌ No files uploaded!", show_alert=True)
         
-    await cb.message.edit_text("🖼️ **Generating Post... Please wait...**")
+    await cb.message.edit_text("🖼️ **Generating Post & Folders... Please wait...**")
     
     details = convo['details']
     m_type = details.get('media_type', 'movie')
     m_id = details.get('id')
     
-    # Auto fetch Trailer URL using Async Thread
     trailer_url = None
     if m_id and not convo.get('is_manual'):
         trailer_url = await asyncio.to_thread(get_tmdb_trailer, m_type, m_id)
@@ -1578,26 +1614,58 @@ async def process_final_post(client, cb: CallbackQuery):
 
     temp_row = []
     for qual in sorted_keys:
-        link = convo['links'][qual]
-        btn_text = qual
-        
-        if qual in priority:
-            btn_text = f"📥 Download {qual}"
-        elif "Episode" in qual:
-            btn_text = qual.replace("Episode", "Ep")
-        
-        if qual in priority:
+        files = convo['links'][qual]
+        if not files:
+            continue
+
+        if len(files) == 1:
+            # 📄 Single file, Normal button
+            link = files[0]['link']
+            btn_name = files[0]['name']
+
+            if qual in priority:
+                btn_text = f"📥 Download {qual}"
+            else:
+                btn_text = btn_name.replace("Episode", "Ep")
+
+            if qual in priority:
+                if temp_row:
+                    buttons.append(temp_row)
+                    temp_row = []
+                buttons.append([InlineKeyboardButton(btn_text, url=link)])
+            else:
+                temp_row.append(InlineKeyboardButton(btn_text, url=link))
+                if len(temp_row) == 3:
+                    buttons.append(temp_row)
+                    temp_row = []
+        else:
+            # 📁 Multiple files -> Folder button
             if temp_row:
                 buttons.append(temp_row)
                 temp_row = []
-            buttons.append([InlineKeyboardButton(btn_text, url=link)])
-        else:
-            temp_row.append(InlineKeyboardButton(btn_text, url=link))
-            if len(temp_row) == 3: 
-                buttons.append(temp_row)
-                temp_row = []
-    
-    if temp_row: buttons.append(temp_row)
+
+            batch_code = "b_" + generate_random_code(8)
+            await batches_collection.insert_one({
+                "batch_code": batch_code,
+                "title": details.get('title') or details.get('name') or "Web Series",
+                "quality": qual,
+                "files": files # List of {'name': 'Ep 1', 'link': 'url'}
+            })
+
+            bot_uname = await get_bot_username()
+            if BLOG_URL and "http" in BLOG_URL:
+                base_blog = BLOG_URL.rstrip("/")
+                final_long_url = f"{base_blog}/?code={batch_code}"
+            else:
+                final_long_url = f"https://t.me/{bot_uname}?start={batch_code}"
+
+            short_link = await shorten_link(uid, final_long_url)
+
+            folder_text = f"📁 {qual} Web Series (Folder)" if qual in priority else f"📁 {qual} (Folder)"
+            buttons.append([InlineKeyboardButton(folder_text, url=short_link)])
+            
+    if temp_row:
+        buttons.append(temp_row)
         
     user_data = await users_collection.find_one({'_id': uid})
     if user_data.get('tutorial_url'):
@@ -1609,7 +1677,6 @@ async def process_final_post(client, cb: CallbackQuery):
     elif details.get('poster_path'):
         poster_input = f"https://image.tmdb.org/t/p/w500{details['poster_path']}"
         
-    # Process Image with Asyncio to prevent lag
     poster_buffer, error = await asyncio.to_thread(
         watermark_poster, poster_input, user_data.get('watermark_text'), convo.get('temp_badge_text')
     )
