@@ -474,7 +474,7 @@ async def generate_channel_caption(data: dict, language: str, short_links: dict,
 
     footer = """\n\nMovie ReQuest Group 
 👇👇👇
-https://t.me/Terabox_search_group
+https://t.me/+CeR1S247j-AyZDFl
 
 Premium Backup Group link 👇👇👇
 https://t.me/+GL_XAS4MsJg4ODM1"""
