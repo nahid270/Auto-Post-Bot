@@ -16,6 +16,7 @@
 # 10. DIRECT TEXT SEARCH (No need to click "Request Movie" button!)
 # 11. SET DOMAIN COMMAND (/setdomain) FOR URL SHORTENERS.
 # 12. [FIXED] AUTO-SEARCH URL SHORTENER INTEGRATION FOR INCOME GENERATION.
+# 13.[ADDED] FETCH CHANNEL TITLE FOR ADDING AND POSTING.
 # ==============================================================================
 
 import os
@@ -372,7 +373,7 @@ def get_tmdb_trailer(media_type, media_id):
         r = requests.get(url, timeout=10)
         r.raise_for_status()
         data = r.json()
-        for vid in data.get("results", []):
+        for vid in data.get("results",[]):
             if vid.get("site") == "YouTube" and vid.get("type") == "Trailer":
                 return f"https://www.youtube.com/watch?v={vid.get('key')}"
     except Exception:
@@ -386,7 +387,7 @@ def get_trending_today():
         r.raise_for_status()
         return r.json().get("results", [])[:10]
     except Exception:
-        return []
+        return[]
 
 def search_tmdb(query: str):
     url = f"https://api.themoviedb.org/3/search/multi?api_key={TMDB_API_KEY}&query={query}&include_adult=true&page=1"
@@ -395,9 +396,9 @@ def search_tmdb(query: str):
         r.raise_for_status()
         data = r.json()
         results = data.get("results", [])
-        return [res for res in results if res.get("media_type") in ["movie", "tv"]][:8] 
+        return [res for res in results if res.get("media_type") in["movie", "tv"]][:8] 
     except Exception:
-        return []
+        return[]
 
 def search_by_imdb(imdb_id: str):
     url = f"https://api.themoviedb.org/3/find/{imdb_id}?api_key={TMDB_API_KEY}&external_source=imdb_id"
@@ -405,16 +406,16 @@ def search_by_imdb(imdb_id: str):
         r = requests.get(url, timeout=10)
         r.raise_for_status()
         data = r.json()
-        results = []
+        results =[]
         for item in data.get("movie_results", []):
             item['media_type'] = 'movie'
             results.append(item)
-        for item in data.get("tv_results", []):
+        for item in data.get("tv_results",[]):
             item['media_type'] = 'tv'
             results.append(item)
         return results
     except Exception:
-        return []
+        return[]
 
 def get_tmdb_details(media_type, media_id):
     url = f"https://api.themoviedb.org/3/{media_type}/{media_id}?api_key={TMDB_API_KEY}"
@@ -504,7 +505,7 @@ async def settings_dashboard(client, message: Message):
     watermark = user_data.get('watermark_text', 'Not Set')
     api_url = user_data.get('shortener_url', 'Not Set')
     timer = user_data.get('delete_timer', 0)
-    channels = user_data.get('channel_ids', [])
+    channels = user_data.get('channel_ids',[])
     channel_list = ", ".join(channels) if channels else "None"
 
     text = (f"⚙️ **Your Settings Dashboard** ⚙️\n\n"
@@ -648,10 +649,8 @@ async def start_cmd(client, message: Message):
     
     if uid == OWNER_ID:
         welcome_text = f"👑 **Welcome Boss!**\n\n**Admin Control Panel:**"
-        buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📢 Broadcast", callback_data="admin_broadcast"),
-             InlineKeyboardButton("📊 Stats", callback_data="admin_stats")],
-            [InlineKeyboardButton("➕ Add Premium", callback_data="admin_add_premium"),
+        buttons = InlineKeyboardMarkup([[InlineKeyboardButton("📢 Broadcast", callback_data="admin_broadcast"),
+             InlineKeyboardButton("📊 Stats", callback_data="admin_stats")],[InlineKeyboardButton("➕ Add Premium", callback_data="admin_add_premium"),
              InlineKeyboardButton("➖ Remove Premium", callback_data="admin_rem_premium")],
              [InlineKeyboardButton("⚙️ Setup Instructions", callback_data="api_help")]
         ])
@@ -663,7 +662,7 @@ async def start_cmd(client, message: Message):
             [InlineKeyboardButton("👤 My Account", callback_data="my_account")],
         ]
         if not is_premium:
-            user_buttons.insert(0, [InlineKeyboardButton("💎 Buy Premium Access", user_id=OWNER_ID)])
+            user_buttons.insert(0,[InlineKeyboardButton("💎 Buy Premium Access", user_id=OWNER_ID)])
             
         buttons = InlineKeyboardMarkup(user_buttons)
 
@@ -764,20 +763,45 @@ async def settings_commands(client, message: Message):
     elif cmd == "addchannel":
         if len(message.command) > 1:
             cid = message.command[1]
-            await users_collection.update_one({'_id': uid}, {'$addToSet': {'channel_ids': cid}}, upsert=True)
-            await message.reply_text(f"✅ Channel `{cid}` added.")
+            try:
+                chat_info = await client.get_chat(int(cid) if cid.lstrip('-').isdigit() else cid)
+                real_cid = str(chat_info.id)
+                chat_title = chat_info.title
+                await users_collection.update_one({'_id': uid}, {'$addToSet': {'channel_ids': real_cid}}, upsert=True)
+                await message.reply_text(f"✅ Channel **{chat_title}** (`{real_cid}`) added successfully.")
+            except Exception as e:
+                await message.reply_text(f"❌ Error! Make sure Bot is Admin in `{cid}`.\nDetails: {e}")
+        else:
+            await message.reply_text("❌ Usage: `/addchannel -100xxxx`")
 
     elif cmd == "delchannel":
         if len(message.command) > 1:
             cid = message.command[1]
-            await users_collection.update_one({'_id': uid}, {'$pull': {'channel_ids': cid}})
-            await message.reply_text(f"✅ Channel `{cid}` removed.")
+            try:
+                chat_info = await client.get_chat(int(cid) if cid.lstrip('-').isdigit() else cid)
+                target_id = str(chat_info.id)
+            except:
+                target_id = cid
+            await users_collection.update_one({'_id': uid}, {'$pull': {'channel_ids': target_id}})
+            await message.reply_text(f"✅ Channel removed.")
+        else:
+            await message.reply_text("❌ Usage: `/delchannel -100xxxx`")
 
     elif cmd == "mychannels":
         data = await users_collection.find_one({'_id': uid})
-        channels = data.get('channel_ids', [])
-        if channels: await message.reply_text(f"📋 **Channels:**\n" + "\n".join([f"`{c}`" for c in channels]))
-        else: await message.reply_text("❌ No channels saved.")
+        channels = data.get('channel_ids',[])
+        if channels:
+            msg = await message.reply_text("🔄 Fetching your channels...")
+            text = "📋 **Your Saved Channels:**\n\n"
+            for c in channels:
+                try:
+                    chat = await client.get_chat(int(c))
+                    text += f"📢 **{chat.title}**\n└ ID: `{c}`\n\n"
+                except:
+                    text += f"⚠️ **Unknown/Inaccessible**\n└ ID: `{c}`\n\n"
+            await msg.edit_text(text)
+        else:
+            await message.reply_text("❌ No channels saved.")
 
 # ==============================================================================
 # 7. AUTO POST (TMDB & IMDb SMART SEARCH) & TRENDING
@@ -793,7 +817,7 @@ async def trending_cmd(client, message: Message):
     if not results:
         return await msg.edit_text("❌ **Could not fetch trending data right now.**")
         
-    buttons = []
+    buttons =[]
     for r in results:
         m_type = r.get('media_type', 'movie')
         title = r.get('title') or r.get('name')
@@ -814,7 +838,7 @@ async def post_search_cmd(client, message: Message):
     
     search_type, m_type, extracted_val = extract_id_from_url(raw_query)
     
-    results = []
+    results =[]
     
     if search_type == "tmdb":
         details = await asyncio.to_thread(get_tmdb_details, m_type, extracted_val)
@@ -826,7 +850,7 @@ async def post_search_cmd(client, message: Message):
                 "state": "wait_lang",
                 "is_manual": False
             }
-            langs = [["English", "Hindi"], ["Bengali", "Dual Audio"]]
+            langs = [["English", "Hindi"],["Bengali", "Dual Audio"]]
             buttons = [[InlineKeyboardButton(l, callback_data=f"lang_{l}") for l in row] for row in langs]
             buttons.append([InlineKeyboardButton("✍️ Custom Language", callback_data="lang_custom")])
             
@@ -845,7 +869,7 @@ async def post_search_cmd(client, message: Message):
     if not results:
         return await msg.edit_text("❌ **No results found!**\nTry checking the spelling or use an IMDb link.")
     
-    buttons = []
+    buttons =[]
     for r in results:
         m_type = r.get('media_type', 'movie')
         title = r.get('title') or r.get('name')
@@ -863,8 +887,7 @@ async def post_search_cmd(client, message: Message):
 async def manual_cmd_start(client, message: Message):
     await message.reply_text(
         "📝 **Manual Post Creation**\n\nWhat are you uploading?",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎬 Movie", callback_data="manual_type_movie"),
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎬 Movie", callback_data="manual_type_movie"),
              InlineKeyboardButton("📺 Web Series", callback_data="manual_type_tv")]
         ])
     )
@@ -900,7 +923,7 @@ async def media_selected(client, cb: CallbackQuery):
         "is_manual": False
     }
     
-    langs = [["English", "Hindi"], ["Bengali", "Dual Audio"]]
+    langs = [["English", "Hindi"],["Bengali", "Dual Audio"]]
     buttons = [[InlineKeyboardButton(l, callback_data=f"lang_{l}") for l in row] for row in langs]
     buttons.append([InlineKeyboardButton("✍️ Custom Language", callback_data="lang_custom")])
 
@@ -934,13 +957,7 @@ async def show_upload_panel(message, uid, is_edit=False):
     
     batch_callback = "toggle_batch"
     
-    buttons = [
-        [InlineKeyboardButton("📤 Upload 480p", callback_data="up_480p")],
-        [InlineKeyboardButton("📤 Upload 720p", callback_data="up_720p")],
-        [InlineKeyboardButton("📤 Upload 1080p", callback_data="up_1080p")],
-        [InlineKeyboardButton(batch_text, callback_data=batch_callback)], 
-        [InlineKeyboardButton("➕ Custom Button / Episode", callback_data="add_custom_btn")],
-        [InlineKeyboardButton("🎨 Add Badge", callback_data="set_badge")],
+    buttons = [[InlineKeyboardButton("📤 Upload 480p", callback_data="up_480p")],[InlineKeyboardButton("📤 Upload 720p", callback_data="up_720p")],[InlineKeyboardButton("📤 Upload 1080p", callback_data="up_1080p")],[InlineKeyboardButton(batch_text, callback_data=batch_callback)],[InlineKeyboardButton("➕ Custom Button / Episode", callback_data="add_custom_btn")],[InlineKeyboardButton("🎨 Add Badge", callback_data="set_badge")],
         [InlineKeyboardButton("✅ FINISH & POST", callback_data="proc_final")]
     ]
     
@@ -984,8 +1001,7 @@ async def toggle_batch_handler(client, cb: CallbackQuery):
             "👉 Type a prefix like `S1`, `S01` or `Season 1`.\n"
             "Buttons will look like: **S1 E1**, **S1 E2** etc.\n\n"
             "👇 **Click Skip** to use default (**Episode 1**).",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⏭ SKIP (Default)", callback_data="batch_skip_season")],
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⏭ SKIP (Default)", callback_data="batch_skip_season")],
                 [InlineKeyboardButton("❌ Cancel", callback_data="back_panel")]
             ])
         )
@@ -1042,7 +1058,6 @@ async def back_button(client, cb: CallbackQuery):
         user_conversations[uid]["is_batch_mode"] = False
         user_conversations[uid]["batch_season_prefix"] = None
     await show_upload_panel(cb.message, uid, is_edit=True)
-
 # ==============================================================================
 # 10. ADD EPISODE (EDIT) & REPOST SYSTEM
 # ==============================================================================
@@ -1183,7 +1198,7 @@ async def main_conversation_handler(client, message: Message):
                 corrected_title = request_text
 
             clean_name = re.sub(r'[^a-zA-Z0-9\s]', ' ', corrected_title)
-            words = [w for w in clean_name.split() if len(w) > 1][:4] 
+            words =[w for w in clean_name.split() if len(w) > 1][:4] 
             if not words: words = request_text.split()[:4]
             
             regex_pattern = "".join([f"(?=.*{re.escape(w)})" for w in words])
@@ -1192,7 +1207,7 @@ async def main_conversation_handler(client, message: Message):
             found_files = await files_collection.find(query).to_list(length=10)
             
             if found_files:
-                buttons = []
+                buttons =[]
                 languages = set()
                 genres = set()
                 
@@ -1327,7 +1342,7 @@ async def main_conversation_handler(client, message: Message):
         await message.reply_text("✅ Rating Saved.\n\n🎭 **Send Genres:** (e.g. Action, Drama)\n_Send 'skip' to leave empty._")
         
     elif state == "wait_manual_genres":
-        if text.lower() == "skip": convo["details"]["genres"] = []
+        if text.lower() == "skip": convo["details"]["genres"] =[]
         else: convo["details"]["genres"] = [{"name": g.strip()} for g in text.split(",")]
         convo["state"] = "wait_manual_poster"
         await message.reply_text("✅ Genres Saved.\n\n🖼 **Send Poster Photo:**")
@@ -1408,7 +1423,7 @@ async def main_conversation_handler(client, message: Message):
             short_link = await shorten_link(uid, final_long_url)
             
             new_button = InlineKeyboardButton(button_name, url=short_link)
-            current_keyboard = old_markup.inline_keyboard if old_markup else []
+            current_keyboard = old_markup.inline_keyboard if old_markup else[]
             
             if current_keyboard and len(current_keyboard[-1]) < 3 and "Episode" in button_name:
                 current_keyboard[-1].append(new_button)
@@ -1432,10 +1447,7 @@ async def main_conversation_handler(client, message: Message):
                 f"The old post has been updated.\n\n"
                 f"🚀 **Do you want to Repost to Channel?**\n"
                 f"(So users get a notification)",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🚀 Repost Full Post (Fresh)", callback_data="repost_full")],
-                    [InlineKeyboardButton("🔔 Send Update Alert Only", callback_data="repost_alert")],
-                    [InlineKeyboardButton("❌ Done (No Post)", callback_data="close_post")]
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Repost Full Post (Fresh)", callback_data="repost_full")],[InlineKeyboardButton("🔔 Send Update Alert Only", callback_data="repost_alert")],[InlineKeyboardButton("❌ Done (No Post)", callback_data="close_post")]
                 ])
             )
             
@@ -1564,7 +1576,7 @@ async def process_final_post(client, cb: CallbackQuery):
     )
     
     buttons = []
-    priority = ["480p", "720p", "1080p"]
+    priority =["480p", "720p", "1080p"]
     
     def sort_key(k):
         if k in priority: return priority.index(k)
@@ -1576,7 +1588,7 @@ async def process_final_post(client, cb: CallbackQuery):
 
     sorted_keys = sorted(convo['links'].keys(), key=sort_key)
 
-    temp_row = []
+    temp_row =[]
     for qual in sorted_keys:
         link = convo['links'][qual]
         btn_text = qual
@@ -1589,13 +1601,13 @@ async def process_final_post(client, cb: CallbackQuery):
         if qual in priority:
             if temp_row:
                 buttons.append(temp_row)
-                temp_row = []
+                temp_row =[]
             buttons.append([InlineKeyboardButton(btn_text, url=link)])
         else:
             temp_row.append(InlineKeyboardButton(btn_text, url=link))
             if len(temp_row) == 3: 
                 buttons.append(temp_row)
-                temp_row = []
+                temp_row =[]
     
     if temp_row: buttons.append(temp_row)
         
@@ -1631,11 +1643,19 @@ async def process_final_post(client, cb: CallbackQuery):
     }
     
     channels = user_data.get('channel_ids', [])
-    channel_btns = []
+    channel_btns =[]
     
     if channels:
         for cid in channels:
-            channel_btns.append([InlineKeyboardButton(f"📢 Post to: {cid}", callback_data=f"sndch_{cid}")])
+            try:
+                # ডাইনামিক ভাবে টেলিগ্রাম থেকে চ্যানেলের নাম আনা হচ্ছে
+                chat_info = await client.get_chat(int(cid))
+                btn_name = f"📢 {chat_info.title}"
+            except Exception:
+                # যদি কোনো কারণে চ্যানেলের অ্যাক্সেস না থাকে, তাহলে আইডি দেখাবে
+                btn_name = f"📢 Post to: {cid}"
+                
+            channel_btns.append([InlineKeyboardButton(btn_name, callback_data=f"sndch_{cid}")])
     else:
         await client.send_message(uid, "⚠️ **No Channels Saved!** Add using `/addchannel <id>`.")
     
